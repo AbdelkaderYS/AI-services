@@ -1,0 +1,4 @@
+requests>=2.31
+pypdf>=4.0
+# optional: for the web_search tool
+# duckduckgo_search>=6.2
