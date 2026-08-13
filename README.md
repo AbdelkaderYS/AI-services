@@ -2,17 +2,49 @@
 
 A light AI agent with a chat web interface. No framework. Works with any OpenAI-compatible API.
 
-## Web interface (nice chat UI)
+## Getting started
 
+Clone the repo:
+
+```bash
+git clone https://github.com/AbdelkaderYS/AI-services.git
+cd AI-services
 ```
+
+**1. Create a virtual environment (recommended)**
+
+```bash
+python3 -m venv venv
+source venv/bin/activate        # on Windows: venv\Scripts\activate
+```
+
+**2. Install dependencies**
+
+```bash
+pip install -r requirements.txt
+```
+
+> On Debian/Ubuntu, if pip refuses with `externally-managed-environment`, you skipped the venv step above — either go back and create one, or run `pip install -r requirements.txt --break-system-packages`.
+
+**3. Configure your API key**
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and set `AI_AGENT_KEY` (a free key from [Groq](https://console.groq.com) takes a minute — it's the default provider). No key at all? Use `AI_AGENT_PROVIDER=ollama` instead to run fully local. See [Providers](#providers) below for all options.
+
+**4. Run it**
+
+```bash
 python3 webapp.py
 ```
 
-Then open http://localhost:8080 in your browser.
+Open http://localhost:8080 — that's it.
 
-## Setup
+## Setup reference
 
-Put your config in a `.env` file (copy from `.env.example`):
+Full `.env` example:
 
 ```
 AI_AGENT_PROVIDER=groq
@@ -38,12 +70,10 @@ Groq models you can use in `AI_AGENT_MODEL`: `llama-3.3-70b-versatile` (default)
 Formats: `.txt .md .csv .json .log .py .docx .pdf`.
 Documents are saved in `data/documents.json` and survive restarts (this file is gitignored, so it stays local).
 
-## Install and run
+## Other ways to run it
 
-```
-pip install -r requirements.txt
+```bash
 python3 agent.py          # command-line chat
-python3 webapp.py         # web chat interface
 python3 test_system.py    # run the tests
 ```
 
