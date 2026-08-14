@@ -2,45 +2,79 @@
 
 A light AI agent with a chat web interface. No framework. Works with any OpenAI-compatible API.
 
-## Getting started
+## Getting started (Windows + VS Code)
 
-Clone the repo:
+**0. Install the two prerequisites** (skip any you already have)
+- [Git for Windows](https://git-scm.com/download/win) — keep all installer defaults
+- [Python](https://www.python.org/downloads/) — on the first installer screen, **tick "Add python.exe to PATH"** before clicking Install. This is the #1 thing people forget, and without it none of the commands below will work.
+
+Restart VS Code after installing these so it picks up the new PATH.
+
+**1. Clone the repo**
+
+Open VS Code → `Ctrl+Shift+P` → type **"Git: Clone"** → paste:
+```
+https://github.com/AbdelkaderYS/AI-services.git
+```
+Pick a folder, then click **Open** when VS Code asks. (Or via terminal: `git clone https://github.com/AbdelkaderYS/AI-services.git` then `cd AI-services`.)
+
+**2. Open a terminal in VS Code**
+
+Menu **Terminal → New Terminal** (or `` Ctrl+` ``). It opens PowerShell by default in the project folder.
+
+**3. Create and activate a virtual environment**
+
+```powershell
+python -m venv venv
+venv\Scripts\Activate.ps1
+```
+
+> If PowerShell refuses with *"running scripts is disabled on this system"*, run this once, then retry the line above:
+> ```powershell
+> Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+> ```
+
+You'll know it worked when the terminal prompt starts with `(venv)`. VS Code may also pop up "Select Python Interpreter" — pick the one inside `venv`.
+
+**4. Install dependencies**
+
+```powershell
+pip install -r requirements.txt
+```
+
+**5. Configure your API key**
+
+```powershell
+copy .env.example .env
+```
+(or just right-click `.env.example` in the VS Code file explorer → Copy → Paste → rename the copy to `.env`)
+
+Open `.env` in VS Code and set `AI_AGENT_KEY` (a free key from [Groq](https://console.groq.com) takes a minute — it's the default provider). No key at all? Use `AI_AGENT_PROVIDER=ollama` instead to run fully local. See [Providers](#providers) below for all options.
+
+**6. Run it**
+
+```powershell
+python webapp.py
+```
+
+If Windows Defender Firewall pops up, click **Allow access**. Open http://localhost:8080 in your browser — that's it.
+
+<details>
+<summary><strong>macOS / Linux instructions</strong></summary>
 
 ```bash
 git clone https://github.com/AbdelkaderYS/AI-services.git
 cd AI-services
-```
-
-**1. Create a virtual environment (recommended)**
-
-```bash
 python3 -m venv venv
-source venv/bin/activate        # on Windows: venv\Scripts\activate
-```
-
-**2. Install dependencies**
-
-```bash
+source venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env        # then edit .env and set AI_AGENT_KEY
+python3 webapp.py
 ```
 
 > On Debian/Ubuntu, if pip refuses with `externally-managed-environment`, you skipped the venv step above — either go back and create one, or run `pip install -r requirements.txt --break-system-packages`.
 
-**3. Configure your API key**
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and set `AI_AGENT_KEY` (a free key from [Groq](https://console.groq.com) takes a minute — it's the default provider). No key at all? Use `AI_AGENT_PROVIDER=ollama` instead to run fully local. See [Providers](#providers) below for all options.
-
-**4. Run it**
-
-```bash
-python3 webapp.py
-```
-
-Open http://localhost:8080 — that's it.
+</details>
 
 ## Setup reference
 
@@ -73,8 +107,8 @@ Documents are saved in `data/documents.json` and survive restarts (this file is 
 ## Other ways to run it
 
 ```bash
-python3 agent.py          # command-line chat
-python3 test_system.py    # run the tests
+python3 agent.py          # command-line chat (Windows: python agent.py)
+python3 test_system.py    # run the tests (Windows: python test_system.py)
 ```
 
 ## Add a tool
