@@ -1,0 +1,9 @@
+Commandes a copier-coller une par une dans le terminal PowerShell de VS Code.
+
+Test-Path "C:\Program Files\Git\cmd\git.exe"
+
+Test-Path "C:\Program Files (x86)\Git\cmd\git.exe"
+
+$env:Path -split ';'
+
+git --version
