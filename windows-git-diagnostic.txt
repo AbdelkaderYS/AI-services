@@ -1,9 +1,27 @@
-Commandes a copier-coller une par une dans le terminal PowerShell de VS Code.
+Etape 1 - verifier si Git est installe (deja fait, resultat: True pour la version x86)
 
 Test-Path "C:\Program Files\Git\cmd\git.exe"
 
 Test-Path "C:\Program Files (x86)\Git\cmd\git.exe"
 
-$env:Path -split ';'
+
+Etape 2 - ajouter Git au PATH utilisateur
+
+$oldPath = [Environment]::GetEnvironmentVariable("Path","User")
+
+[Environment]::SetEnvironmentVariable("Path", $oldPath + ";C:\Program Files (x86)\Git\cmd", "User")
+
+
+Etape 3 - fermer TOUTE la fenetre VS Code (pas juste le terminal), puis la rouvrir
+
+
+Etape 4 - dans un nouveau terminal, verifier que ca marche
 
 git --version
+
+
+Etape 5 - si ca affiche un numero de version, cloner le repo
+
+git clone https://github.com/AbdelkaderYS/AI-services.git
+
+cd AI-services
