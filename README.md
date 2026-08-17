@@ -88,7 +88,7 @@ AI_AGENT_PORT=8080
 ```
 
 ### Providers
-- **Local (recommended)**: install [Ollama](https://ollama.com), then `ollama pull llama3.2`, then `AI_AGENT_PROVIDER=ollama` (no key needed)
+- **Local, no key needed (recommended to try first)**: install [Ollama](https://ollama.com/download) ([Windows](https://ollama.com/download/windows) runs in the background, tray icon), then in a terminal run `ollama pull llama3.2` (~2GB, one-time download), then set `AI_AGENT_PROVIDER=ollama` in `.env` (leave `AI_AGENT_KEY` empty). Runs fully offline after the model is downloaded. Slower than Groq on a laptop with no dedicated GPU, but free and private.
 - **Groq (free, fast)**: key at https://console.groq.com → `AI_AGENT_KEY=...`
 - **OpenRouter (free models)**: key at https://openrouter.ai → `AI_AGENT_KEY=...` + `AI_AGENT_PROVIDER=openrouter`
 - **OpenAI**: `AI_AGENT_PROVIDER=openai` + `AI_AGENT_KEY=sk-...`
