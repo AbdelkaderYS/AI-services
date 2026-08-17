@@ -42,16 +42,24 @@ You'll know it worked when the terminal prompt starts with `(venv)`. VS Code may
 pip install -r requirements.txt
 ```
 
-**5. Configure your API key**
+**5. Copy the config file**
 
 ```powershell
 copy .env.example .env
 ```
 (or just right-click `.env.example` in the VS Code file explorer → Copy → Paste → rename the copy to `.env`)
 
-Open `.env` in VS Code and set `AI_AGENT_KEY` (a free key from [Groq](https://console.groq.com) takes a minute — it's the default provider). No key at all? Use `AI_AGENT_PROVIDER=ollama` instead to run fully local. See [Providers](#providers) below for all options.
+It defaults to the local, no-key provider (Ollama) — no editing needed for the next step. Want to use Groq/OpenAI/OpenRouter instead? Open `.env` and see [Providers](#providers) below.
 
-**6. Run it**
+**6. Install Ollama and pull the model**
+
+Download and install [Ollama for Windows](https://ollama.com/download/windows) (runs in the background, tray icon). Then in the terminal:
+```powershell
+ollama pull llama3.2
+```
+One-time download, ~2GB.
+
+**7. Run it**
 
 ```powershell
 python webapp.py
@@ -68,7 +76,8 @@ cd AI-services
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env        # then edit .env and set AI_AGENT_KEY
+cp .env.example .env        # defaults to Ollama, no key needed
+# install Ollama (https://ollama.com/download) then: ollama pull llama3.2
 python3 webapp.py
 ```
 
@@ -78,18 +87,25 @@ python3 webapp.py
 
 ## Setup reference
 
-Full `.env` example:
+Full `.env` example (default, local Ollama — see [Getting started](#getting-started-windows--vs-code) above):
+
+```
+AI_AGENT_PROVIDER=ollama
+AI_AGENT_KEY=
+AI_AGENT_PORT=8080
+```
+
+To switch provider, change `AI_AGENT_PROVIDER` and set `AI_AGENT_KEY`, e.g.:
 
 ```
 AI_AGENT_PROVIDER=groq
 AI_AGENT_KEY=gsk_...
 AI_AGENT_MODEL=llama-3.3-70b-versatile
-AI_AGENT_PORT=8080
 ```
 
 ### Providers
-- **Local, no key needed (recommended to try first)**: install [Ollama](https://ollama.com/download) ([Windows](https://ollama.com/download/windows) runs in the background, tray icon), then in a terminal run `ollama pull llama3.2` (~2GB, one-time download), then set `AI_AGENT_PROVIDER=ollama` in `.env` (leave `AI_AGENT_KEY` empty). Runs fully offline after the model is downloaded. Slower than Groq on a laptop with no dedicated GPU, but free and private.
-- **Groq (free, fast)**: key at https://console.groq.com → `AI_AGENT_KEY=...`
+- **Local, no key needed (default)**: install [Ollama](https://ollama.com/download) ([Windows](https://ollama.com/download/windows) runs in the background, tray icon), then in a terminal run `ollama pull llama3.2` (~2GB, one-time download). Runs fully offline after the model is downloaded. Slower than Groq on a laptop with no dedicated GPU, but free and private.
+- **Groq (free, fast)**: key at https://console.groq.com → `AI_AGENT_KEY=...` + `AI_AGENT_PROVIDER=groq`
 - **OpenRouter (free models)**: key at https://openrouter.ai → `AI_AGENT_KEY=...` + `AI_AGENT_PROVIDER=openrouter`
 - **OpenAI**: `AI_AGENT_PROVIDER=openai` + `AI_AGENT_KEY=sk-...`
 

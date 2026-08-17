@@ -22,10 +22,10 @@ def load_env(path=".env"):
 load_env()
 
 DEFAULT_CONFIG = {
-    "provider": "groq",  # groq | openrouter | ollama | openai
-    "model": "llama-3.3-70b-versatile",
-    "base_url": "https://api.groq.com/openai/v1",
-    "api_key": os.environ.get("AI_AGENT_KEY", ""),
+    "provider": "ollama",  # groq | openrouter | ollama | openai
+    "model": "llama3.2",
+    "base_url": "http://localhost:11434/v1",
+    "api_key": os.environ.get("AI_AGENT_KEY", "ollama"),
     "max_steps": 8,
     "system_prompt": "You are a helpful assistant. Use tools when they help. Answer concisely.",
     "temperature": 0.3,
@@ -47,7 +47,7 @@ class APIError(Exception):
 
 def get_config():
     cfg = dict(DEFAULT_CONFIG)
-    provider = os.environ.get("AI_AGENT_PROVIDER", "groq")
+    provider = os.environ.get("AI_AGENT_PROVIDER", "ollama")
     cfg["provider"] = provider
     if provider in CONFIGS:
         cfg.update(CONFIGS[provider])
