@@ -89,6 +89,21 @@ def chunk_text(text, size=1200, overlap=150):
         paras = [line.strip() for line in text.splitlines() if line.strip()]
     if not paras:
         return []
+
+    # A paragraph can itself be bigger than `size` (common with PDFs that
+    # extract without blank lines between paragraphs); split those further
+    # so a single dense block can't become one giant chunk.
+    pieces = []
+    for p in paras:
+        if len(p) <= size:
+            pieces.append(p)
+        else:
+            start = 0
+            while start < len(p):
+                pieces.append(p[start:start + size])
+                start += size - overlap
+    paras = pieces
+
     chunks, cur, cur_len = [], [], 0
     for p in paras:
         if cur_len + len(p) > size and cur:

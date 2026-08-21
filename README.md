@@ -5,8 +5,8 @@ A light AI agent with a chat web interface. No framework. Works with any OpenAI-
 ## Getting started (Windows + VS Code)
 
 **0. Install the two prerequisites** (skip any you already have)
-- [Git for Windows](https://git-scm.com/download/win) — keep all installer defaults
-- [Python](https://www.python.org/downloads/) — on the first installer screen, **tick "Add python.exe to PATH"** before clicking Install. This is the #1 thing people forget, and without it none of the commands below will work.
+- [Git for Windows](https://git-scm.com/download/win): keep all installer defaults
+- [Python](https://www.python.org/downloads/): on the first installer screen, **tick "Add python.exe to PATH"** before clicking Install. This is the #1 thing people forget, and without it none of the commands below will work.
 
 Restart VS Code after installing these so it picks up the new PATH.
 
@@ -34,7 +34,7 @@ venv\Scripts\Activate.ps1
 > Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 > ```
 
-You'll know it worked when the terminal prompt starts with `(venv)`. VS Code may also pop up "Select Python Interpreter" — pick the one inside `venv`.
+You'll know it worked when the terminal prompt starts with `(venv)`. VS Code may also pop up "Select Python Interpreter"; pick the one inside `venv`.
 
 **4. Install dependencies**
 
@@ -49,7 +49,7 @@ copy .env.example .env
 ```
 (or just right-click `.env.example` in the VS Code file explorer → Copy → Paste → rename the copy to `.env`)
 
-It defaults to the local, no-key provider (Ollama) — no editing needed for the next step. Want to use Groq/OpenAI/OpenRouter instead? Open `.env` and see [Providers](#providers) below.
+It defaults to the local, no-key provider (Ollama), so no editing is needed for the next step. Want to use Groq/OpenAI/OpenRouter instead? Open `.env` and see [Providers](#providers) below.
 
 **6. Install Ollama and pull the model**
 
@@ -65,7 +65,7 @@ One-time download, ~2GB.
 python webapp.py
 ```
 
-If Windows Defender Firewall pops up, click **Allow access**. Open http://localhost:8080 in your browser — that's it.
+If Windows Defender Firewall pops up, click **Allow access**. Open http://localhost:8080 in your browser. That's it.
 
 <details>
 <summary><strong>macOS / Linux instructions</strong></summary>
@@ -81,13 +81,13 @@ cp .env.example .env        # defaults to Ollama, no key needed
 python3 webapp.py
 ```
 
-> On Debian/Ubuntu, if pip refuses with `externally-managed-environment`, you skipped the venv step above — either go back and create one, or run `pip install -r requirements.txt --break-system-packages`.
+> On Debian/Ubuntu, if pip refuses with `externally-managed-environment`, you skipped the venv step above; either go back and create one, or run `pip install -r requirements.txt --break-system-packages`.
 
 </details>
 
 ## Setup reference
 
-Full `.env` example (default, local Ollama — see [Getting started](#getting-started-windows--vs-code) above):
+Full `.env` example (default, local Ollama; see [Getting started](#getting-started-windows--vs-code) above):
 
 ```
 AI_AGENT_PROVIDER=ollama
@@ -100,7 +100,7 @@ To switch provider, change `AI_AGENT_PROVIDER` and set `AI_AGENT_KEY`, e.g.:
 ```
 AI_AGENT_PROVIDER=groq
 AI_AGENT_KEY=gsk_...
-AI_AGENT_MODEL=openai/gpt-oss-120b
+AI_AGENT_MODEL=qwen/qwen3.6-27b
 ```
 
 ### Providers
@@ -109,7 +109,7 @@ AI_AGENT_MODEL=openai/gpt-oss-120b
 - **OpenRouter (free models)**: key at https://openrouter.ai → `AI_AGENT_KEY=...` + `AI_AGENT_PROVIDER=openrouter`
 - **OpenAI**: `AI_AGENT_PROVIDER=openai` + `AI_AGENT_KEY=sk-...`
 
-Groq models you can use in `AI_AGENT_MODEL`: `openai/gpt-oss-120b` (default), `openai/gpt-oss-20b` (fast), `qwen/qwen3.6-27b`. Check the current list at https://console.groq.com/docs/models — Groq retires older models over time.
+Groq models you can use in `AI_AGENT_MODEL`: `qwen/qwen3.6-27b` (default), `openai/gpt-oss-20b`, `openai/gpt-oss-120b`. Check the current list at https://console.groq.com/docs/models. Groq retires older models over time.
 
 ## RAG (ask your documents)
 

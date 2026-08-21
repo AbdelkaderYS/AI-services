@@ -419,7 +419,7 @@ HTML = """<!doctype html>
         <div class="welcome" id="welcome">
           <div class="logo">A</div>
           <h1>Ask away.</h1>
-          <p>Chat freely &mdash; it searches the web, checks your documents, and remembers what you tell it, automatically.</p>
+          <p>Chat freely. It searches the web, checks your documents, and remembers what you tell it, automatically.</p>
           <div id="setup" style="display:none" class="notice"></div>
           <div class="chips">
             <button class="chip" onclick="ask('Search the web for today\'s news')">

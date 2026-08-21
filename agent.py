@@ -46,7 +46,7 @@ DEFAULT_CONFIG = {
 }
 
 CONFIGS = {
-    "groq": {"base_url": "https://api.groq.com/openai/v1", "model": "openai/gpt-oss-120b"},
+    "groq": {"base_url": "https://api.groq.com/openai/v1", "model": "qwen/qwen3.6-27b"},
     "openrouter": {"base_url": "https://openrouter.ai/api/v1", "model": "deepseek/deepseek-chat:free"},
     "ollama": {"base_url": "http://localhost:11434/v1", "model": "llama3.2", "api_key": "ollama"},
     "openai": {"base_url": "https://api.openai.com/v1", "model": "gpt-4o-mini"},

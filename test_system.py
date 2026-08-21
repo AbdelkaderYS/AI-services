@@ -38,6 +38,13 @@ with tempfile.TemporaryDirectory() as tmp:
     check("retrieval finds doc", len(hits) > 0, str(hits))
     check("retrieval top text contains 'Eiffel'", "Eiffel" in hits[0]["text"])
 
+    # a PDF extracted as one dense block (no blank lines) must still get split;
+    # otherwise a single chunk can carry the whole document and blow past a
+    # provider's per-request token limit
+    dense_doc = rag.add_document("dense.txt", ("word " * 5000).encode())
+    check("dense single-paragraph doc gets split", dense_doc["ok"] and dense_doc["chunks"] > 1, str(dense_doc))
+    rag.remove_document(dense_doc["id"])
+
     r2 = rag.add_document("landmarks.txt", b"New content about the Pyramids of Giza in Egypt, built around 2560 BC.")
     check("dedupe replaces same name", r2["ok"] and len(rag.list_documents()[0]) == 1, str(r2))
     check("old content gone", rag.retrieve("Eiffel") == [], str(rag.retrieve("Eiffel")))
