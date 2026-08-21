@@ -107,23 +107,32 @@ HTML = """<!doctype html>
     font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
   #convo-list { flex: 1; overflow-y: auto; }
+  .convo-row {
+    display: flex; align-items: center;
+    border-left: 2px solid transparent;
+    margin-bottom: 2px;
+  }
+  .convo-row:hover { border-left-color: var(--border); }
+  .convo-row.active { border-left-color: var(--accent); }
+  .convo-row.active .convo { color: var(--accent); }
   .convo {
+    flex: 1; min-width: 0;
     display: block;
-    width: 100%;
     text-align: left;
     background: none;
     border: none;
-    border-left: 2px solid transparent;
     color: var(--text);
     padding: 9px 10px;
     font-size: 14px;
-    margin-bottom: 2px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .convo:hover { border-left-color: var(--border); }
-  .convo.active { border-left-color: var(--accent); color: var(--accent); }
+  .convo-del {
+    background: none; border: none; color: var(--muted);
+    font-size: 14px; line-height: 1; padding: 6px 8px; flex-shrink: 0;
+  }
+  .convo-del:hover { color: var(--danger); }
   .no-convos { color: var(--muted); font-size: 13px; padding: 4px; }
 
   main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -448,11 +457,34 @@ function renderSidebar() {
   }
   list.innerHTML = "";
   for (const id of ids) {
+    const row = document.createElement("div");
+    row.className = "convo-row" + (id === currentId ? " active" : "");
     const b = document.createElement("button");
-    b.className = "convo" + (id === currentId ? " active" : "");
+    b.className = "convo";
     b.textContent = titleOf(convos[id].messages);
     b.onclick = () => switchChat(id);
-    list.appendChild(b);
+    const del = document.createElement("button");
+    del.className = "convo-del";
+    del.textContent = "×";
+    del.title = "Delete chat";
+    del.onclick = (e) => { e.stopPropagation(); deleteChat(id); };
+    row.appendChild(b);
+    row.appendChild(del);
+    list.appendChild(row);
+  }
+}
+
+function deleteChat(id) {
+  delete convos[id];
+  save();
+  if (id !== currentId) { renderSidebar(); return; }
+  const remaining = Object.keys(convos);
+  if (remaining.length) {
+    switchChat(remaining[remaining.length - 1]);
+  } else {
+    currentId = null;
+    renderSidebar();
+    showWelcome();
   }
 }
 
