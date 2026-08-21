@@ -4,6 +4,9 @@ import time
 
 import requests
 
+import memory
+import rag
+
 
 def load_env(path=".env"):
     if not os.path.exists(path):
@@ -27,14 +30,23 @@ DEFAULT_CONFIG = {
     "base_url": "http://localhost:11434/v1",
     "api_key": os.environ.get("AI_AGENT_KEY", "ollama"),
     "max_steps": 8,
-    "system_prompt": "You are a helpful assistant. Use tools when they help. Answer concisely.",
+    "system_prompt": (
+        "You are a helpful assistant with access to tools. "
+        "Use web_search for current events or anything that requires the internet. "
+        "Use search_documents whenever the question could be about the user's uploaded documents; "
+        "answer only from what the tool returns, and say so plainly if nothing relevant is found. "
+        "Never invent document content. "
+        "Use remember when the user tells you something worth keeping for later (preferences, facts about them). "
+        "Use recall_memory when a question might be answered by something saved earlier. "
+        "Answer directly when no tool is needed. Be concise."
+    ),
     "temperature": 0.3,
     "max_retries": 3,
     "timeout": 90,
 }
 
 CONFIGS = {
-    "groq": {"base_url": "https://api.groq.com/openai/v1", "model": "llama-3.3-70b-versatile"},
+    "groq": {"base_url": "https://api.groq.com/openai/v1", "model": "openai/gpt-oss-120b"},
     "openrouter": {"base_url": "https://openrouter.ai/api/v1", "model": "deepseek/deepseek-chat:free"},
     "ollama": {"base_url": "http://localhost:11434/v1", "model": "llama3.2", "api_key": "ollama"},
     "openai": {"base_url": "https://api.openai.com/v1", "model": "gpt-4o-mini"},
@@ -74,6 +86,50 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_documents",
+            "description": (
+                "Search the user's uploaded documents for relevant passages. "
+                "Use for any question that could be about a document the user uploaded."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "remember",
+            "description": "Save an important fact about the user or their preferences for future conversations.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "information": {
+                        "type": "string",
+                        "description": "The fact to remember, as a short standalone sentence.",
+                    }
+                },
+                "required": ["information"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "recall_memory",
+            "description": "Search previously saved facts or memories about the user from past conversations.",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        },
+    },
 ]
 
 
@@ -94,6 +150,26 @@ def call_tool(name, args):
                     for r in ddgs.text(query, max_results=3)
                 ]
             return {"results": results}
+        if name == "search_documents":
+            query = str(args.get("query", ""))
+            if not query:
+                return {"error": "No query given."}
+            hits = rag.retrieve(query, top_k=3)
+            if not hits:
+                return {"result": "No uploaded documents match this query (or no documents have been uploaded)."}
+            return {"results": [{"document": h["name"], "excerpt": h["text"]} for h in hits]}
+        if name == "remember":
+            info = str(args.get("information", ""))
+            result = memory.remember(info)
+            if not result.get("ok"):
+                return {"error": result.get("error", "Could not save.")}
+            return {"result": "Noted."}
+        if name == "recall_memory":
+            query = str(args.get("query", ""))
+            hits = memory.recall(query)
+            if not hits:
+                return {"result": "No saved memories match this query."}
+            return {"results": [{"memory": h["text"], "saved_at": h["ts"]} for h in hits]}
         return {"error": f"unknown tool: {name}"}
     except Exception as e:
         return {"error": f"{name} failed: {e}"}
@@ -150,7 +226,7 @@ def chat(cfg, messages, tools=None, timeout=None, retries=None):
     raise APIError(last_err)
 
 
-def run_with_messages(messages):
+def run_with_messages(messages, tool_trace=None):
     cfg = get_config()
     msgs = list(messages)
     for _ in range(cfg["max_steps"]):
@@ -165,6 +241,8 @@ def run_with_messages(messages):
             except json.JSONDecodeError:
                 args = {}
             name = tc.get("function", {}).get("name", "?")
+            if tool_trace is not None:
+                tool_trace.append(name)
             result = call_tool(name, args)
             msgs.append({
                 "role": "tool",

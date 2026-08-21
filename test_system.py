@@ -6,6 +6,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import memory
 import rag
 from agent import call_tool, get_config, APIError
 
@@ -74,6 +75,33 @@ t = call_tool("web_search", {"query": "test"})
 check("web_search graceful when missing", "error" in t, str(t))
 
 check("unknown tool", "error" in call_tool("nope", {}))
+
+t = call_tool("search_documents", {"query": "document number 3"})
+check("search_documents finds a remaining doc", "results" in t and any("number 3" in r["excerpt"] for r in t["results"]), str(t))
+
+t = call_tool("search_documents", {"query": ""})
+check("search_documents requires a query", "error" in t, str(t))
+
+# --- MEMORY ---
+with tempfile.TemporaryDirectory() as tmp:
+    memory.DATA_DIR = tmp
+    memory.STORE_PATH = os.path.join(tmp, "memory.json")
+    memory.MEMORIES = []
+
+    t = call_tool("remember", {"information": "The user is vegetarian."})
+    check("remember tool saves", t.get("result") == "Noted.", str(t))
+
+    t = call_tool("recall_memory", {"query": "vegetarian"})
+    check("recall_memory finds saved fact", "results" in t and any("vegetarian" in r["memory"] for r in t["results"]), str(t))
+
+    t = call_tool("recall_memory", {"query": "something with no keyword overlap at all"})
+    check("recall_memory falls back to recent when no match", "results" in t, str(t))
+
+    empty = call_tool("remember", {"information": ""})
+    check("remember rejects empty fact", "error" in empty, str(empty))
+
+    removed = memory.forget(memory.MEMORIES[0]["id"])
+    check("forget removes a memory", removed and not memory.MEMORIES, str(memory.MEMORIES))
 
 os.environ["AI_AGENT_MODEL"] = "qwen/qwen3.6-27b"
 check("model override from env", get_config()["model"] == "qwen/qwen3.6-27b")

@@ -5,6 +5,7 @@ from urllib.parse import parse_qs, urlparse
 
 from agent import get_config, run_with_messages, APIError
 import agent
+import memory
 import rag
 
 PORT = int(os.environ.get("AI_AGENT_PORT", "8080"))
@@ -288,20 +289,6 @@ HTML = """<!doctype html>
   }
 
   footer { padding: 12px 20px 22px; }
-  .options {
-    max-width: 720px; margin: 0 auto 10px;
-    display: flex; align-items: center; gap: 10px;
-  }
-  .options label {
-    display: flex; align-items: center; gap: 7px;
-    color: var(--muted); font-size: 12.5px; font-weight: 500; cursor: pointer;
-    background: var(--bg); border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 6px 13px; user-select: none;
-  }
-  .options label:hover { color: var(--text); border-color: #ccd1d8; }
-  .options label.hidden { display: none; }
-  .options label.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
   .upload-btn {
     display: flex; align-items: center; justify-content: center; gap: 7px;
     background: var(--bg); border: 1px dashed var(--border); color: var(--muted);
@@ -386,7 +373,7 @@ HTML = """<!doctype html>
     .welcome h1 { font-size: 20px; }
     .welcome p { padding: 0 8px; }
     footer { padding: 10px 12px 14px; }
-    .options, .input-row { max-width: 100%; }
+    .input-row { max-width: 100%; }
     textarea { font-size: 16px; }
   }
 </style>
@@ -408,6 +395,8 @@ HTML = """<!doctype html>
     </button>
     <input type="file" id="file" multiple accept=".txt,.md,.csv,.json,.log,.docx,.pdf" style="display:none" onchange="uploadFiles(this.files); this.value=''">
     <div id="doc-list"></div>
+    <div class="sidebar-title">Memories</div>
+    <div id="memory-list"><div class="no-convos">Nothing remembered yet.</div></div>
   </aside>
 
   <main>
@@ -419,7 +408,7 @@ HTML = """<!doctype html>
         <div class="brand-logo">A</div>
         <div class="brand-text">
           <div class="brand-name">AI Services</div>
-          <div class="brand-desc">Chat &middot; Tools &middot; Documents</div>
+          <div class="brand-desc">Chat &middot; Tools &middot; Documents &middot; Memory</div>
         </div>
       </div>
       <div class="badge"><span class="status-dot"></span>Model: <b id="model-badge">loading...</b></div>
@@ -430,7 +419,7 @@ HTML = """<!doctype html>
         <div class="welcome" id="welcome">
           <div class="logo">A</div>
           <h1>Ask away.</h1>
-          <p>Chat freely, search the web, or upload your own documents and ask questions about them.</p>
+          <p>Chat freely &mdash; it searches the web, checks your documents, and remembers what you tell it, automatically.</p>
           <div id="setup" style="display:none" class="notice"></div>
           <div class="chips">
             <button class="chip" onclick="ask('Search the web for today\'s news')">
@@ -447,9 +436,6 @@ HTML = """<!doctype html>
     </div>
 
     <footer>
-      <div class="options">
-        <label id="rag-toggle"><input type="checkbox" id="rag-chk" onchange="saveRag()"> Ask my documents</label>
-      </div>
       <div class="input-row">
         <textarea id="input" rows="1" placeholder="Send a message..."></textarea>
         <button id="send" onclick="sendMsg()" aria-label="Send">
@@ -648,7 +634,7 @@ async function ask(text) {
     const res = await fetch("/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: history, use_docs: ragEnabled() }),
+      body: JSON.stringify({ messages: history }),
       signal: ctrl.signal,
     });
     clearTimeout(abortTimer);
@@ -679,6 +665,7 @@ async function ask(text) {
   } finally {
     save();
     renderSidebar();
+    refreshMemories();
     setBusy(false);
     try { document.getElementById("input").disabled = false; } catch (_) {}
   }
@@ -712,9 +699,6 @@ async function fetchBadge(model) {
 function dragToTop() { const w = document.getElementById("welcome"); if (w) w.style.display = "none"; }
 
 /* ---- Documents (RAG) ---- */
-const RAG_KEY = "aiagent_rag";
-function ragEnabled() { return document.getElementById("rag-chk").checked; }
-function saveRag() { localStorage.setItem(RAG_KEY, ragEnabled() ? "1" : "0"); }
 function toast(msg, isErr) {
   const t = document.getElementById("toast");
   t.textContent = msg;
@@ -776,9 +760,44 @@ async function refreshDocs() {
       list.appendChild(item);
     }
   }
-  const label = document.getElementById("rag-toggle");
-  label.classList.toggle("hidden", !docs.length);
-  if (!docs.length) document.getElementById("rag-chk").checked = false;
+}
+
+async function refreshMemories() {
+  let data;
+  try {
+    const r = await fetch("/memories", { method: "POST" });
+    data = await r.json();
+  } catch (e) { return; }
+  const mems = data.memories || [];
+  const list = document.getElementById("memory-list");
+  if (!mems.length) {
+    list.innerHTML = '<div class="no-convos">Nothing remembered yet.</div>';
+  } else {
+    list.innerHTML = "";
+    for (const m of mems) {
+      const item = document.createElement("div");
+      item.className = "doc-item";
+      const text = document.createElement("span");
+      text.className = "doc-name";
+      text.textContent = m.text;
+      text.title = m.text;
+      const del = document.createElement("button");
+      del.className = "del";
+      del.innerHTML = TRASH_ICON;
+      del.title = "Forget";
+      del.onclick = async () => {
+        await fetch("/memories/del", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: m.id }),
+        });
+        refreshMemories();
+      };
+      item.appendChild(text);
+      item.appendChild(del);
+      list.appendChild(item);
+    }
+  }
 }
 
 const area = document.getElementById("input");
@@ -793,8 +812,8 @@ area.addEventListener("input", () => {
 load();
 if (!Object.keys(convos).length) newChat(); else switchChat(Object.keys(convos)[Object.keys(convos).length - 1]);
 fetchBadge(null);
-document.getElementById("rag-chk").checked = localStorage.getItem(RAG_KEY) === "1";
 refreshDocs();
+refreshMemories();
 </script>
 </body>
 </html>
@@ -834,6 +853,12 @@ class Handler(BaseHTTPRequestHandler):
             ok = rag.remove_document(body.get("id", ""))
             docs, remaining = rag.list_documents()
             return self._send(200, json.dumps({"ok": ok, "docs": docs, "max": rag.MAX_DOCS, "remaining": remaining}), "application/json")
+        if self.path == "/memories":
+            return self._send(200, json.dumps({"memories": memory.list_memories()}), "application/json")
+        if self.path == "/memories/del":
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or 0))
+            ok = memory.forget(body.get("id", ""))
+            return self._send(200, json.dumps({"ok": ok, "memories": memory.list_memories()}), "application/json")
         self._send(404, "Not found", "text/plain")
 
     def upload(self):
@@ -855,7 +880,6 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         history = body.get("messages", [])
-        use_docs = bool(body.get("use_docs"))
         cfg = get_config()
 
         if not cfg["api_key"]:
@@ -874,28 +898,17 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, json.dumps({"reply": None, "no_key": False, "model": cfg["model"]}), "application/json")
             return
 
-        messages = [{"role": "system", "content": cfg["system_prompt"]}]
-
-        if use_docs:
-            question = history[-1]["content"] if history else ""
-            chunks = rag.retrieve(question, top_k=3)
-            if chunks:
-                excerpts = "\n\n---\n\n".join(f"[{c['name']}] {c['text']}" for c in chunks)
-                messages.append({"role": "system", "content":
-                    "You are reading the user's documents. Answer using ONLY the excerpts below "
-                    "when possible. If the answer is not in there, say: 'That is not in your documents.'\n\n"
-                    f"Excerpts:\n{excerpts}"})
-
-        messages += history
+        messages = [{"role": "system", "content": cfg["system_prompt"]}] + history
+        tool_trace = []
         try:
-            reply = run_with_messages(messages)
+            reply = run_with_messages(messages, tool_trace=tool_trace)
         except agent.APIError as e:
             reply = f"Provider error: {e}"
         except Exception as e:
             reply = f"Unexpected error: {e}"
         self._send(200, json.dumps({
             "reply": reply, "no_key": False, "model": cfg["model"],
-            "used_docs": use_docs and bool(chunks),
+            "used_docs": "search_documents" in tool_trace,
         }), "application/json")
 
 

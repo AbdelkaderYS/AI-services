@@ -100,7 +100,7 @@ To switch provider, change `AI_AGENT_PROVIDER` and set `AI_AGENT_KEY`, e.g.:
 ```
 AI_AGENT_PROVIDER=groq
 AI_AGENT_KEY=gsk_...
-AI_AGENT_MODEL=llama-3.3-70b-versatile
+AI_AGENT_MODEL=openai/gpt-oss-120b
 ```
 
 ### Providers
@@ -109,7 +109,7 @@ AI_AGENT_MODEL=llama-3.3-70b-versatile
 - **OpenRouter (free models)**: key at https://openrouter.ai → `AI_AGENT_KEY=...` + `AI_AGENT_PROVIDER=openrouter`
 - **OpenAI**: `AI_AGENT_PROVIDER=openai` + `AI_AGENT_KEY=sk-...`
 
-Groq models you can use in `AI_AGENT_MODEL`: `llama-3.3-70b-versatile` (default), `llama-3.1-8b-instant` (fast), `openai/gpt-oss-120b`, `qwen/qwen3.6-27b`.
+Groq models you can use in `AI_AGENT_MODEL`: `openai/gpt-oss-120b` (default), `openai/gpt-oss-20b` (fast), `qwen/qwen3.6-27b`. Check the current list at https://console.groq.com/docs/models — Groq retires older models over time.
 
 ## RAG (ask your documents)
 
