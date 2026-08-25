@@ -19,7 +19,7 @@ HTML = r"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-store">
-<title>AI Services</title>
+<title>GifteQChat</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
@@ -233,6 +233,31 @@ HTML = r"""<!doctype html>
     font-size: 12.5px; line-height: 1.5;
   }
   .msg.ai .bubble pre code { background: none; padding: 0; }
+
+  /* Code blocks: a titled frame with a copy button, so code can be lifted out
+     verbatim instead of being selected by hand out of the prose. */
+  .code-block {
+    margin: 8px 0; border: 1px solid var(--border);
+    border-radius: var(--radius-md); overflow: hidden;
+  }
+  .code-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; padding: 5px 8px 5px 12px;
+    background: #eceff3; border-bottom: 1px solid var(--border);
+  }
+  .code-lang {
+    font-size: 10.5px; font-weight: 600; letter-spacing: .6px;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .code-copy {
+    background: none; border: 1px solid var(--border); border-radius: 4px;
+    color: var(--muted); font-size: 11px; font-weight: 500; padding: 2px 9px;
+  }
+  .code-copy:hover { color: var(--accent); border-color: var(--accent); background: var(--bg); }
+  .msg.ai .bubble .code-block pre {
+    margin: 0; border: none; border-radius: 0;
+    white-space: pre; tab-size: 4;
+  }
   .chat-img {
     display: block; max-width: 100%; height: auto;
     border-radius: var(--radius-md); margin-top: 8px;
@@ -438,9 +463,9 @@ HTML = r"""<!doctype html>
         <button class="menu-btn" onclick="toggleSidebar()" aria-label="Menu">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
         </button>
-        <div class="brand-logo">A</div>
+        <div class="brand-logo">G</div>
           <div class="brand-text">
-          <div class="brand-name">AI Services</div>
+          <div class="brand-name">GifteQChat</div>
           <div class="brand-desc">Chat &middot; Tools &middot; Documents &middot; Memory &middot; Agents</div>
         </div>
       </div>
@@ -450,7 +475,7 @@ HTML = r"""<!doctype html>
     <div id="messages">
       <div class="messages-inner" id="msg-inner">
         <div class="welcome" id="welcome">
-          <div class="logo">A</div>
+          <div class="logo">G</div>
           <h1>Ask away.</h1>
           <p>Chat freely. It searches the web, checks your documents, and remembers what you tell it, automatically.</p>
           <div id="setup" style="display:none" class="notice"></div>
@@ -603,17 +628,66 @@ function escHtml(s) {
   return d.innerHTML;
 }
 
-/* Tiny safe Markdown: escape everything first, then re-add trusted tags. */
+/* Tiny safe Markdown: escape everything first, then re-add trusted tags.
+   Code is lifted out before the prose passes run: otherwise the heading and
+   list rules, which are line-based over the whole string, rewrite the contents
+   of code blocks (a Python `# comment` would turn into an <h3>). */
 function mdToHtml(src) {
   let html = escHtml(String(src));
-  html = html.replace(/```[a-zA-Z0-9_-]*\n?([\s\S]*?)```/g, (_, c) => `<pre><code>${c}</code></pre>`);
-  html = html.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+  const stash = [];
+  const hold = (h) => "%%MD" + (stash.push(h) - 1) + "%%";
+
+  html = html.replace(/```([a-zA-Z0-9_+-]*)[ \t]*\n?([\s\S]*?)```/g,
+    (_, lang, c) => "%%BLK" + (stash.push(
+      `<pre><code data-lang="${lang}">${c.replace(/\n$/, "")}</code></pre>`) - 1) + "%%");
+  html = html.replace(/`([^`\n]+)`/g, (_, c) => hold(`<code>${c}</code>`));
   html = html.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
   html = html.replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<em>$2</em>");
   html = html.replace(/^### (.*)$/gm, "<h4>$1</h4>");
   html = html.replace(/^(#{1,2}) (.*)$/gm, "<h3>$2</h3>");
   html = html.replace(/^[-*] (.*)$/gm, "&bull; $1");
-  return html;
+  // The bubble renders with pre-wrap, so newlines around a block-level frame
+  // would show up as blank space: swallow them with the placeholder.
+  return html
+    .replace(/[ \t]*\n?[ \t]*%%BLK(\d+)%%[ \t]*\n?/g, (_, i) => stash[i])
+    .replace(/%%MD(\d+)%%/g, (_, i) => stash[i]);
+}
+
+/* Wrap each block of code in a frame with its language and a copy button.
+   textContent is copied, so what lands on the clipboard is the code exactly as
+   the model wrote it, with no markup and no leading prompt characters. */
+function enhanceCodeBlocks(root) {
+  root.querySelectorAll("pre > code").forEach((code) => {
+    const pre = code.parentElement;
+    if (pre.dataset.framed) return;
+    pre.dataset.framed = "1";
+
+    const frame = document.createElement("div");
+    frame.className = "code-block";
+    const bar = document.createElement("div");
+    bar.className = "code-bar";
+    const lang = document.createElement("span");
+    lang.className = "code-lang";
+    lang.textContent = code.dataset.lang || "code";
+    const btn = document.createElement("button");
+    btn.className = "code-copy";
+    btn.textContent = "Copy";
+    btn.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(code.textContent);
+        btn.textContent = "Copied";
+      } catch (e) {
+        btn.textContent = "Press Ctrl+C";
+      }
+      setTimeout(() => { btn.textContent = "Copy"; }, 1600);
+    };
+    bar.appendChild(lang);
+    bar.appendChild(btn);
+
+    pre.replaceWith(frame);
+    frame.appendChild(bar);
+    frame.appendChild(pre);
+  });
 }
 
 const IMG_RE = /\[\[IMG:[0-9a-f]+\]\]/g;
@@ -650,7 +724,7 @@ function messageNode(role, text, note, images) {
   wrap.className = "msg " + role;
   const who = document.createElement("div");
   who.className = "who";
-  who.textContent = role === "user" ? "You" : "AI Services";
+  who.textContent = role === "user" ? "You" : "GifteQChat";
   wrap.appendChild(who);
   const bubble = document.createElement("div");
   bubble.className = "bubble";
@@ -686,6 +760,7 @@ function messageNode(role, text, note, images) {
       };
       bubble.appendChild(img);
     });
+    enhanceCodeBlocks(bubble);
     typesetMath(bubble);
   }
   wrap.appendChild(bubble);
@@ -766,7 +841,7 @@ async function ask(text) {
 
   const typing = document.createElement("div");
   typing.className = "msg ai typing";
-  typing.innerHTML = '<div class="who">AI Services</div><div class="bubble"><span></span><span></span><span></span></div>';
+  typing.innerHTML = '<div class="who">GifteQChat</div><div class="bubble"><span></span><span></span><span></span></div>';
   document.getElementById("msg-inner").appendChild(typing);
   document.getElementById("messages").scrollTop = document.getElementById("messages").scrollHeight;
   setBusy(true);
@@ -1096,7 +1171,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     cfg = get_config()
-    print(f"AI web UI ready: http://localhost:{PORT}")
+    print(f"GifteQChat ready: http://localhost:{PORT}")
     print(f"Provider: {cfg['provider']}  |  Model: {cfg['model']}")
     if not cfg["api_key"]:
         print("Warning: no AI_AGENT_KEY set. Set AI_AGENT_PROVIDER=ollama or export AI_AGENT_KEY=...")

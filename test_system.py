@@ -85,8 +85,23 @@ with tempfile.TemporaryDirectory() as tmp:
     check("remove works", removed)
 
 # --- AGENT ---
-t = call_tool("web_search", {"query": "test"})
-check("web_search graceful when missing", "error" in t, str(t))
+# No live query here: the suite must stay fast and runnable offline. What
+# matters is that the backend is installed (it silently was not, so the tool
+# answered "not installed" to every search) and that bad input is rejected.
+try:
+    import ddgs  # noqa: F401
+    _search_backend = True
+except ImportError:
+    try:
+        import duckduckgo_search  # noqa: F401
+        _search_backend = True
+    except ImportError:
+        _search_backend = False
+check("a web search backend is installed", _search_backend,
+      "pip install ddgs")
+
+t = call_tool("web_search", {"query": ""})
+check("web_search rejects an empty query", "error" in t, str(t))
 
 check("unknown tool", "error" in call_tool("nope", {}))
 
@@ -284,6 +299,17 @@ check("reloading a chat re-renders its images",
 check("only role/content are sent to the model",
       "history.map((m) => ({ role: m.role, content: m.content }))" in UI)
 check("a token that no longer resolves degrades to a note", "img.onerror" in UI)
+
+# Code must be stashed before the heading/list passes run, or a Python
+# "# comment" inside a fenced block gets rewritten into an <h3>.
+code_pass = UI.index("```([a-zA-Z0-9_+-]*)")
+check("code is lifted out before the prose passes",
+      code_pass < UI.index("^(#{1,2}) (.*)$") and code_pass < UI.index("^[-*] (.*)$"))
+check("code blocks are framed with a copy button",
+      "function enhanceCodeBlocks(root)" in UI
+      and "enhanceCodeBlocks(bubble);" in UI
+      and "navigator.clipboard.writeText(code.textContent)" in UI)
+check("the block's language is carried through", 'data-lang="${lang}"' in UI)
 
 # server-side: client bookkeeping must never reach the provider payload
 handler = webapp.Handler.__new__(webapp.Handler)

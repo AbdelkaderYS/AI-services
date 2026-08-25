@@ -34,7 +34,7 @@ DEFAULT_CONFIG = {
     "api_key": os.environ.get("AI_AGENT_KEY", "ollama"),
     "max_steps": 8,
     "system_prompt": (
-        "You are a helpful assistant with access to tools. "
+        "You are GifteQChat, a helpful assistant with access to tools. "
         "Use web_search for current events or anything that requires the internet. "
         "Use search_documents whenever the question could be about the user's uploaded documents; "
         "answer only from what the tool returns, and say so plainly if nothing relevant is found. "
@@ -264,14 +264,19 @@ def call_tool(name, args):
             if not query:
                 return {"error": "No query given."}
             try:
-                from duckduckgo_search import DDGS
+                from ddgs import DDGS  # duckduckgo_search was renamed to ddgs
             except ImportError:
-                return {"error": "web_search is not installed. Run: pip install duckduckgo-search"}
+                try:
+                    from duckduckgo_search import DDGS
+                except ImportError:
+                    return {"error": "web_search is not installed. Run: pip install ddgs"}
             with DDGS() as ddgs:
                 results = [
-                    {"title": r["title"], "body": r["body"]}
-                    for r in ddgs.text(query, max_results=3)
+                    {"title": r.get("title", ""), "body": r.get("body", ""), "url": r.get("href", "")}
+                    for r in ddgs.text(query, max_results=5)
                 ]
+            if not results:
+                return {"result": "The web search returned no results for this query."}
             return {"results": results}
         if name == "search_documents":
             query = str(args.get("query", ""))

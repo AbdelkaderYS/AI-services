@@ -1,4 +1,4 @@
-# AI Services
+# GifteQChat
 
 A light AI agent with a chat web interface. No framework. Works with any OpenAI-compatible API.
 
