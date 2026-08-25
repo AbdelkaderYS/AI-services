@@ -1,11 +1,14 @@
 import json
 import os
+import threading
 import time
 
 import requests
 
 import memory
+import mcp_client
 import rag
+import sandbox
 
 
 def load_env(path=".env"):
@@ -36,8 +39,17 @@ DEFAULT_CONFIG = {
         "Use search_documents whenever the question could be about the user's uploaded documents; "
         "answer only from what the tool returns, and say so plainly if nothing relevant is found. "
         "Never invent document content. "
+        "Use run_python to compute anything mathematical or data-related, test logic, or process text; "
+        "write complete standalone scripts that print their results. To show a chart or plot, save it as a "
+        "PNG file with matplotlib (plt.savefig('plot.png')); it will be displayed automatically. "
+        "Report only what tools actually returned: never claim a file was created or a computation "
+        "succeeded unless the tool result confirms it; if code fails, say so and fix it. "
         "Use remember when the user tells you something worth keeping for later (preferences, facts about them). "
         "Use recall_memory when a question might be answered by something saved earlier. "
+        "For complex multi-part requests, delegate parts to specialist sub-agents with delegate_task: "
+        "'researcher' for web research, 'doc_analyst' for questions about the user's documents, "
+        "'analyst' for calculations or code execution. Give each one a clear, self-contained task; "
+        "then combine their reports into your final answer. "
         "Answer directly when no tool is needed. Be concise."
     ),
     "temperature": 0.3,
@@ -73,7 +85,7 @@ def get_config():
     return cfg
 
 
-TOOLS = [
+BASE_TOOLS = [
     {
         "type": "function",
         "function": {
@@ -130,7 +142,118 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_python",
+            "description": (
+                "Execute a standalone Python script in an isolated sandbox and return stdout/stderr. "
+                "Use for math, data processing, text analysis, or verifying logic. "
+                "To display a chart or figure to the user, save it as PNG with matplotlib "
+                "(plt.savefig('plot.png'), never plt.show()); it is shown to them automatically. "
+                "If the tool result contains [[IMG:...]] markers, copy them unchanged into your final "
+                "answer where the image belongs. "
+                "Base your report strictly on the tool output; never claim success you don't see."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "Complete Python script to run."},
+                    "timeout": {
+                        "type": "number",
+                        "description": "Optional max runtime in seconds (1-60, default 15).",
+                    },
+                },
+                "required": ["code"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delegate_task",
+            "description": (
+                "Delegate a self-contained sub-task to a specialist sub-agent and get its report back. "
+                "Roles: researcher (web research), doc_analyst (answers from the user's documents), "
+                "analyst (calculations and Python execution). "
+                "Use for complex requests with several independent parts, or to keep heavy research "
+                "out of the main conversation."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "role": {
+                        "type": "string",
+                        "enum": ["researcher", "doc_analyst", "analyst"],
+                        "description": "Which specialist to delegate to.",
+                    },
+                    "task": {
+                        "type": "string",
+                        "description": "Clear, self-contained instructions and context for the sub-agent.",
+                    },
+                },
+                "required": ["role", "task"],
+            },
+        },
+    },
 ]
+
+# Sub-agents can only use tools from their allow-list, and never delegate_task
+# itself: delegation never recurses.
+SUBAGENTS = {
+    "researcher": {
+        "allow": ["web_search"],
+        "prompt": (
+            "You are a web research specialist. Research the task using web_search "
+            "(several targeted queries if needed), then write a concise report of your findings. "
+            "State clearly when information could not be found or is uncertain."
+        ),
+    },
+    "doc_analyst": {
+        "allow": ["search_documents"],
+        "prompt": (
+            "You are a document analyst. Answer strictly from the user's documents using search_documents; "
+            "quote the relevant passages you rely on. Never invent content, and say plainly when the "
+            "documents do not contain the answer."
+        ),
+    },
+    "analyst": {
+        "allow": ["run_python"],
+        "prompt": (
+            "You are a computation specialist. Solve the task by writing and running Python with run_python. "
+            "Show the key numbers/results in your final answer, computed not guessed. If code fails, fix it "
+            "and retry before concluding."
+        ),
+    },
+}
+
+
+def get_tools(include_delegate=True):
+    if include_delegate:
+        return list(BASE_TOOLS) + mcp_client.tool_specs()
+    return [t for t in BASE_TOOLS if t["function"]["name"] != "delegate_task"] + mcp_client.tool_specs()
+
+
+def _tools_for_roles(allow):
+    wanted = set(allow)
+    return [t for t in BASE_TOOLS if t["function"]["name"] in wanted]
+
+
+# Images produced by tools during a request, per thread (one request = one thread).
+_ctx = threading.local()
+
+
+def _images_buffer():
+    if not hasattr(_ctx, "images"):
+        _ctx.images = []
+    return _ctx.images
+
+
+def pop_images():
+    """Tokens of images produced since the last run start (thread-local)."""
+    out = list(_images_buffer())
+    _ctx.images = []
+    return out
 
 
 def call_tool(name, args):
@@ -170,6 +293,20 @@ def call_tool(name, args):
             if not hits:
                 return {"result": "No saved memories match this query."}
             return {"results": [{"memory": h["text"], "saved_at": h["ts"]} for h in hits]}
+        if name == "run_python":
+            result = sandbox.run_python(args.get("code"), args.get("timeout"))
+            produced = result.get("images") or []
+            if produced:
+                seen = set(_images_buffer())
+                for tok in produced:
+                    if tok not in seen:
+                        _images_buffer().append(tok)
+                        seen.add(tok)
+            return result
+        if name == "delegate_task":
+            return delegate_task(str(args.get("role", "")), args.get("task"))
+        if name.startswith("mcp_"):
+            return mcp_client.route_call(name, args)
         return {"error": f"unknown tool: {name}"}
     except Exception as e:
         return {"error": f"{name} failed: {e}"}
@@ -183,7 +320,9 @@ def _parse_http_error(r, body):
     except Exception:
         pass
     hint = ""
-    if r.status_code == 401:
+    if r.status_code == 400:
+        hint = " (the model produced an invalid request, often a malformed tool call; try rephrasing)"
+    elif r.status_code == 401:
         hint = " (bad API key? check AI_AGENT_KEY)"
     elif r.status_code == 429:
         hint = " (rate limit)"
@@ -226,14 +365,13 @@ def chat(cfg, messages, tools=None, timeout=None, retries=None):
     raise APIError(last_err)
 
 
-def run_with_messages(messages, tool_trace=None):
-    cfg = get_config()
+def run_loop(cfg, messages, tools, max_steps, tool_trace=None):
     msgs = list(messages)
-    for _ in range(cfg["max_steps"]):
-        msg = chat(cfg, msgs, TOOLS)
+    for _ in range(max_steps):
+        msg = chat(cfg, msgs, tools)
         msgs.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": msg.get("tool_calls")})
         if not msg.get("tool_calls"):
-            return msg.get("content") or "(no output)"
+            return msg.get("content") or "(The model returned an empty response. Try rephrasing.)"
         for tc in msg.get("tool_calls") or []:
             raw_args = tc.get("function", {}).get("arguments") or "{}"
             try:
@@ -250,6 +388,33 @@ def run_with_messages(messages, tool_trace=None):
                 "content": json.dumps(result, ensure_ascii=False),
             })
     return "(max steps reached)"
+
+
+def run_with_messages(messages, tool_trace=None):
+    cfg = get_config()
+    _ctx.images = []
+    return run_loop(cfg, messages, get_tools(), cfg["max_steps"], tool_trace)
+
+
+def delegate_task(role, task):
+    role_def = SUBAGENTS.get(role)
+    if not role_def:
+        return {"error": f"Unknown role '{role}'. Available: {', '.join(SUBAGENTS)}"}
+    task = str(task or "").strip()
+    if not task:
+        return {"error": "No task given."}
+    cfg = get_config()
+    messages = [
+        {"role": "system", "content": role_def["prompt"]},
+        {"role": "user", "content": task},
+    ]
+    trace = []
+    try:
+        report = run_loop(cfg, messages, _tools_for_roles(role_def["allow"]),
+                          min(cfg["max_steps"], 6), trace)
+    except APIError as e:
+        return {"role": role, "error": f"Sub-agent failed: {e}"}
+    return {"role": role, "task": task, "report": report, "tools_used": trace}
 
 
 def run(prompt):

@@ -1,22 +1,28 @@
 import json
 import os
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from agent import get_config, run_with_messages, APIError
 import agent
+import media
 import memory
+import mcp_client
 import rag
 
 PORT = int(os.environ.get("AI_AGENT_PORT", "8080"))
 
-HTML = """<!doctype html>
+HTML = r"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-store">
 <title>AI Services</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   :root {
@@ -213,6 +219,31 @@ HTML = """<!doctype html>
     border: 1px solid var(--border);
     border-bottom-left-radius: 4px;
   }
+  .msg.ai .bubble h3, .msg.ai .bubble h4 { margin: 10px 0 4px; font-size: 14.5px; }
+  .msg.ai .bubble h3:first-child, .msg.ai .bubble h4:first-child { margin-top: 0; }
+  .msg.ai .bubble code {
+    background: rgba(0,0,0,0.06); border-radius: 4px;
+    padding: 1px 5px; font-size: 12.5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .msg.ai .bubble pre {
+    background: #f6f8fa; border: 1px solid var(--border);
+    border-radius: var(--radius-md); padding: 10px 12px;
+    overflow-x: auto; margin: 8px 0;
+    font-size: 12.5px; line-height: 1.5;
+  }
+  .msg.ai .bubble pre code { background: none; padding: 0; }
+  .chat-img {
+    display: block; max-width: 100%; height: auto;
+    border-radius: var(--radius-md); margin-top: 8px;
+    border: 1px solid var(--border); background: #fff;
+  }
+  .img-gone {
+    display: block; margin-top: 8px;
+    color: var(--muted); font-size: 12.5px; font-style: italic;
+  }
+  .katex-display { margin: 8px 0; overflow-x: auto; overflow-y: hidden; }
+  .katex { font-size: 1.05em; }
   .msg-actions { margin-top: 6px; padding: 0 2px; }
   .copy-btn {
     background: none;
@@ -397,6 +428,8 @@ HTML = """<!doctype html>
     <div id="doc-list"></div>
     <div class="sidebar-title">Memories</div>
     <div id="memory-list"><div class="no-convos">Nothing remembered yet.</div></div>
+    <div class="sidebar-title">MCP servers</div>
+    <div id="mcp-list"><div class="no-convos">No servers configured.</div></div>
   </aside>
 
   <main>
@@ -406,9 +439,9 @@ HTML = """<!doctype html>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
         </button>
         <div class="brand-logo">A</div>
-        <div class="brand-text">
+          <div class="brand-text">
           <div class="brand-name">AI Services</div>
-          <div class="brand-desc">Chat &middot; Tools &middot; Documents &middot; Memory</div>
+          <div class="brand-desc">Chat &middot; Tools &middot; Documents &middot; Memory &middot; Agents</div>
         </div>
       </div>
       <div class="badge"><span class="status-dot"></span>Model: <b id="model-badge">loading...</b></div>
@@ -425,6 +458,10 @@ HTML = """<!doctype html>
             <button class="chip" onclick="ask('Search the web for today\'s news')">
               <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
               Search the web
+            </button>
+            <button class="chip" onclick="ask('Use run_python to compute the 30 first Fibonacci numbers and their sum')">
+              <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+              Run some Python
             </button>
             <button class="chip" onclick="document.getElementById('file').click()">
               <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
@@ -544,7 +581,7 @@ function switchChat(id) {
     if (w) w.style.display = "none";
     clearMessages();
     const inner = document.getElementById("msg-inner");
-    for (const m of convos[id].messages) inner.append(messageNode(m.role, m.content));
+    for (const m of convos[id].messages) inner.append(messageNode(m.role, m.content, false, m.images));
     inner.scrollTop = inner.scrollHeight;
   }
 }
@@ -560,7 +597,55 @@ function showWelcome() {
   if (w) w.style.display = "";
 }
 
-function messageNode(role, text, note) {
+function escHtml(s) {
+  const d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+/* Tiny safe Markdown: escape everything first, then re-add trusted tags. */
+function mdToHtml(src) {
+  let html = escHtml(String(src));
+  html = html.replace(/```[a-zA-Z0-9_-]*\n?([\s\S]*?)```/g, (_, c) => `<pre><code>${c}</code></pre>`);
+  html = html.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+  html = html.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+  html = html.replace(/^### (.*)$/gm, "<h4>$1</h4>");
+  html = html.replace(/^(#{1,2}) (.*)$/gm, "<h3>$2</h3>");
+  html = html.replace(/^[-*] (.*)$/gm, "&bull; $1");
+  return html;
+}
+
+const IMG_RE = /\[\[IMG:[0-9a-f]+\]\]/g;
+
+function typesetMath(el) {
+  try {
+    if (window.renderMathInElement) {
+      renderMathInElement(el, {
+        delimiters: [
+          { left: "$$", right: "$$", display: true },
+          { left: "\\[", right: "\\]", display: true },
+          { left: "$", right: "$", display: false },
+          { left: "\\(", right: "\\)", display: false },
+        ],
+        throwOnError: false,
+      });
+    }
+  } catch (e) {}
+}
+
+/* Models often wrap images as ![alt](file). Normalize before rendering: a
+   markdown ref to a sandbox-local file can never load in the browser, so it is
+   either redundant (the real image rides along as a token) or a dead link. */
+function normalizeImages(src, images) {
+  const out = String(src).replace(/!\[[^\]]*\]\(\s*(\[\[IMG:[0-9a-f]+\]\])\s*\)/g, "$1");
+  const deadRef = /!\[[^\]]*\]\((?!https?:\/\/|\/|data:)[^)]*\)/g;
+  return (images && images.length)
+    ? out.replace(deadRef, "")
+    : out.replace(deadRef, "\n_(the image could not be generated)_\n");
+}
+
+function messageNode(role, text, note, images) {
   const wrap = document.createElement("div");
   wrap.className = "msg " + role;
   const who = document.createElement("div");
@@ -569,7 +654,40 @@ function messageNode(role, text, note) {
   wrap.appendChild(who);
   const bubble = document.createElement("div");
   bubble.className = "bubble";
-  bubble.textContent = text;
+  if (role === "user") {
+    bubble.textContent = text;
+  } else {
+    const clean = normalizeImages(text, images);
+    const parts = clean.split(IMG_RE);
+    const matches = clean.match(IMG_RE) || [];
+    parts.forEach((part, i) => {
+      if (part) {
+        const seg = document.createElement("span");
+        seg.style.display = "block";
+        seg.innerHTML = mdToHtml(part);
+        bubble.appendChild(seg);
+      }
+      const tok = matches[i];
+      if (!tok) return;
+      const info = (images || []).find((x) => x.token === tok);
+      if (!info) return; // stale token from an old chat: drop it
+      const img = document.createElement("img");
+      img.src = info.url;
+      img.alt = "chart generated by the agent";
+      img.className = "chat-img";
+      /* Images live in the server's memory, so tokens from a chat that predates
+         the last restart no longer resolve. Say so instead of showing a broken
+         image icon. */
+      img.onerror = () => {
+        const gone = document.createElement("span");
+        gone.className = "img-gone";
+        gone.textContent = "(image from an earlier session is no longer available)";
+        img.replaceWith(gone);
+      };
+      bubble.appendChild(img);
+    });
+    typesetMath(bubble);
+  }
   wrap.appendChild(bubble);
   if (role === "ai") {
     const actions = document.createElement("div");
@@ -590,9 +708,9 @@ function messageNode(role, text, note) {
   return wrap;
 }
 
-function addMessage(role, text, note) {
+function addMessage(role, text, note, images) {
   const inner = document.getElementById("msg-inner");
-  inner.appendChild(messageNode(role, text, note));
+  inner.appendChild(messageNode(role, text, note, images));
   document.getElementById("messages").scrollTop = document.getElementById("messages").scrollHeight;
 }
 
@@ -600,6 +718,35 @@ function setBusy(state) {
   busy = state;
   document.getElementById("send").disabled = state;
   document.getElementById("input").disabled = state;
+}
+
+async function refreshMcp() {
+  let data;
+  try {
+    const r = await fetch("/mcp", { method: "POST" });
+    data = await r.json();
+  } catch (e) { return; }
+  const servers = data.servers || [];
+  const list = document.getElementById("mcp-list");
+  if (!servers.length) {
+    list.innerHTML = '<div class="no-convos">No servers configured.</div>';
+    return;
+  }
+  list.innerHTML = "";
+  for (const s of servers) {
+    const item = document.createElement("div");
+    item.className = "doc-item";
+    const dot = document.createElement("span");
+    dot.className = "status-dot";
+    dot.style.background = s.ok ? "var(--success)" : "var(--danger)";
+    const name = document.createElement("span");
+    name.className = "doc-name";
+    name.textContent = s.server_name ? `${s.name} (${s.tools.length} tools)` : s.name;
+    name.title = s.ok ? `${s.name}: ${s.tools.join(", ") || "no tools"}` : s.error;
+    item.appendChild(dot);
+    item.appendChild(name);
+    list.appendChild(item);
+  }
 }
 
 async function sendMsg() {
@@ -634,7 +781,9 @@ async function ask(text) {
     const res = await fetch("/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: history }),
+      /* Only role/content go to the model: local bookkeeping such as `images`
+         is not part of the chat-completions message schema. */
+      body: JSON.stringify({ messages: history.map((m) => ({ role: m.role, content: m.content })) }),
       signal: ctrl.signal,
     });
     clearTimeout(abortTimer);
@@ -648,8 +797,8 @@ async function ask(text) {
       document.getElementById("welcome").style.display = "";
     } else {
       hideSetup();
-      addMessage("ai", data.reply, data.used_docs);
-      history.push({ role: "assistant", content: data.reply });
+      addMessage("ai", data.reply, data.used_docs, data.images);
+      history.push({ role: "assistant", content: data.reply, images: data.images || [] });
       fetchBadge(data.model);
     }
   } catch (e) {
@@ -814,6 +963,12 @@ if (!Object.keys(convos).length) newChat(); else switchChat(Object.keys(convos)[
 fetchBadge(null);
 refreshDocs();
 refreshMemories();
+refreshMcp();
+
+/* KaTeX loads with defer, i.e. after this script: typeset history once ready. */
+window.addEventListener("load", () => {
+  document.querySelectorAll("#msg-inner .msg.ai .bubble").forEach(typesetMath);
+});
 </script>
 </body>
 </html>
@@ -834,8 +989,20 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
+        route = urlparse(self.path).path
         if self.path in ("/", "/index.html"):
             self._send(200, HTML, "text/html; charset=utf-8")
+        elif route.startswith("/image/"):
+            data, mime = media.get(unquote(route[len("/image/"):]))
+            if not data:
+                return self._send(404, "Not found", "text/plain")
+            raw = self.wfile
+            self.send_response(200)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "private, max-age=3600")
+            self.end_headers()
+            raw.write(data)
         else:
             self._send(404, "Not found", "text/plain")
 
@@ -859,6 +1026,8 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or 0))
             ok = memory.forget(body.get("id", ""))
             return self._send(200, json.dumps({"ok": ok, "memories": memory.list_memories()}), "application/json")
+        if self.path == "/mcp":
+            return self._send(200, json.dumps({"servers": mcp_client.status()}), "application/json")
         self._send(404, "Not found", "text/plain")
 
     def upload(self):
@@ -879,7 +1048,13 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, json.dumps({"error": "Bad JSON"}), "application/json")
             return
 
-        history = body.get("messages", [])
+        # Never forward client bookkeeping (image tokens...) to the provider:
+        # chat-completions only accepts role/content here.
+        history = [
+            {"role": str(m.get("role", "user")), "content": str(m.get("content") or "")}
+            for m in body.get("messages", [])
+            if isinstance(m, dict)
+        ]
         cfg = get_config()
 
         if not cfg["api_key"]:
@@ -906,8 +1081,15 @@ class Handler(BaseHTTPRequestHandler):
             reply = f"Provider error: {e}"
         except Exception as e:
             reply = f"Unexpected error: {e}"
+        # Deterministic display: append any chart the tools produced, whether or
+        # not the model copied the [[IMG:...]] marker into its prose.
+        for tok in agent.pop_images():
+            if tok not in reply:
+                reply += "\n\n" + tok
+        tokens = re.findall(r"\[\[IMG:[0-9a-f]+\]\]", reply)
+        images = [{"token": t, "url": "/image/" + quote(t.strip("[]"), safe="")} for t in tokens]
         self._send(200, json.dumps({
-            "reply": reply, "no_key": False, "model": cfg["model"],
+            "reply": reply, "images": images, "no_key": False, "model": cfg["model"],
             "used_docs": "search_documents" in tool_trace,
         }), "application/json")
 

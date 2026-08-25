@@ -2,6 +2,9 @@
 
 A light AI agent with a chat web interface. No framework. Works with any OpenAI-compatible API.
 
+Features: chat, web search, RAG on your documents, long-term memory, a sandboxed Python
+code interpreter, specialist sub-agents with task delegation, and MCP tool servers.
+
 ## Getting started (Windows + VS Code)
 
 **0. Install the two prerequisites** (skip any you already have)
@@ -120,6 +123,62 @@ Groq models you can use in `AI_AGENT_MODEL`: `qwen/qwen3.6-27b` (default), `open
 Formats: `.txt .md .csv .json .log .py .docx .pdf`.
 Documents are saved in `data/documents.json` and survive restarts (this file is gitignored, so it stays local).
 
+## Code interpreter (`run_python`)
+
+The agent can write and execute Python in an isolated sandbox: math, data processing,
+text analysis, verifying logic. Each run gets a throwaway interpreter outside the project
+directory with a timeout (default 15 s, max 60 s) and, on Linux/macOS, CPU + memory limits.
+Results come back as stdout/stderr; runaway code is killed automatically.
+
+**Charts are displayed in the chat**: ask for a plot and the agent saves it as PNG
+(matplotlib, headless Agg backend); images appear inside the answer bubble.
+
+> The sandbox is best-effort (no network isolation). Don't point it at hostile code in production.
+
+## Markdown & LaTeX rendering
+
+Replies are rendered as Markdown (bold, italics, inline code, code blocks, headings,
+bullet lists), and math as LaTeX via KaTeX (`$f'(x) = 2x$` inline, `$$...$$` display).
+All content is HTML-escaped before rendering, so neither model nor user input can inject XSS.
+KaTeX loads from a CDN; offline it simply shows the raw notation.
+
+## Sub-agents (`delegate_task`)
+
+For complex multi-part requests the orchestrator delegates to specialists:
+
+| Role | Tools | Purpose |
+|---|---|---|
+| `researcher` | web_search | web research, summarized report |
+| `doc_analyst` | search_documents | answers strictly from your documents |
+| `analyst` | run_python | calculations and code execution |
+
+Each sub-agent has its own system prompt, a restricted tool allow-list, and its own step
+budget. Sub-agents cannot delegate themselves, so recursion is impossible by construction.
+
+## MCP tool servers
+
+The agent can load external tools from [MCP](https://modelcontextprotocol.io) servers over stdio.
+Copy the example config and restart:
+
+```bash
+cp mcp.example.json data/mcp.json   # then edit to taste
+python3 webapp.py                   # connected servers appear in the sidebar
+```
+
+Config format (`data/mcp.json`):
+
+```json
+{
+  "servers": {
+    "fetch": { "command": "uvx", "args": ["mcp-server-fetch"], "call_timeout": 30 }
+  }
+}
+```
+
+- Every tool a server exposes becomes available to the agent as `mcp_<server>_<tool>`
+- A server that fails to start is skipped and shown in red in the sidebar; it never crashes the app
+- No `data/mcp.json`? The feature simply stays off
+
 ## Other ways to run it
 
 ```bash
@@ -127,10 +186,20 @@ python3 agent.py          # command-line chat (Windows: python agent.py)
 python3 test_system.py    # run the tests (Windows: python test_system.py)
 ```
 
+## Troubleshooting
+
+- **Code changes don't appear**: the web UI lives in memory, so **restart `webapp.py`**
+  (Ctrl+C, then relaunch) after editing any project file.
+- **"Chart created" but nothing displayed**: check matplotlib is installed in the *same*
+  Python environment you launch the server with (`python3 -m pip show matplotlib`),
+  then ask again: "show me the plot".
+
 ## Add a tool
 
-1. Declare its spec in `TOOLS` (JSON schema)
+1. Declare its spec in `BASE_TOOLS` (JSON schema, agent.py)
 2. Add the handler in `call_tool()` (agent.py)
+
+MCP servers add tools without touching the code. See [MCP tool servers](#mcp-tool-servers).
 
 ## Use as a library
 
