@@ -125,6 +125,10 @@ HTML = r"""<!doctype html>
     letter-spacing: .6px;
     color: var(--muted);
   }
+  .collapsible-title { cursor: pointer; display: flex; align-items: center; justify-content: space-between; user-select: none; }
+  .collapsible-title:hover { color: var(--text); }
+  .collapsible-title .chev { font-size: 10px; color: var(--muted); }
+  .hidden { display: none !important; }
   #convo-list { flex: 1; overflow-y: auto; }
   .convo-row {
     display: flex; align-items: center;
@@ -458,8 +462,11 @@ HTML = r"""<!doctype html>
     </button>
     <input type="file" id="file" multiple accept=".txt,.md,.markdown,.csv,.json,.log,.py,.doc,.docx,.docm,.xls,.xlsx,.xlsm,.xlsb,.ppt,.pptx,.pps,.pot,.pptm,.ppsx,.ppsm,.odt,.ods,.odp,.rtf,.epub,.pdf" style="display:none" onchange="uploadFiles(this.files); this.value=''">
     <div id="doc-list"></div>
-    <div class="sidebar-title">MCP servers</div>
-    <div id="mcp-list"><div class="no-convos">No servers configured.</div></div>
+    <div class="sidebar-title collapsible-title" id="mcp-title" onclick="toggleMcp()">
+      <span>MCP servers <span id="mcp-count" class="side-count"></span></span>
+      <span class="chev" id="mcp-chev">&#9656;</span>
+    </div>
+    <div id="mcp-list" class="collapsible hidden"><div class="no-convos">No servers configured.</div></div>
   </aside>
 
   <main>
@@ -800,6 +807,12 @@ function setBusy(state) {
   document.getElementById("input").disabled = state;
 }
 
+function toggleMcp() {
+  const list = document.getElementById("mcp-list");
+  list.classList.toggle("hidden");
+  document.getElementById("mcp-chev").innerHTML = list.classList.contains("hidden") ? "&#9656;" : "&#9662;";
+}
+
 async function refreshMcp() {
   let data;
   try {
@@ -807,6 +820,8 @@ async function refreshMcp() {
     data = await r.json();
   } catch (e) { return; }
   const servers = data.servers || [];
+  // Keep the section collapsed by default; just surface how many are connected.
+  document.getElementById("mcp-count").textContent = servers.length ? `(${servers.length})` : "";
   const list = document.getElementById("mcp-list");
   if (!servers.length) {
     list.innerHTML = '<div class="no-convos">No servers configured.</div>';
