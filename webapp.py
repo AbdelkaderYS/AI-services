@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
@@ -12,6 +13,88 @@ import mcp_client
 import rag
 
 PORT = int(os.environ.get("AI_AGENT_PORT", "8080"))
+
+# Optional access lock: set AUTH_PASSWORD to require a one-time login.
+AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "")
+AUTH_ENABLED = bool(AUTH_PASSWORD)
+SESSION_COOKIE = "gq_session"
+SESSION_TOKEN = secrets.token_hex(16) if AUTH_ENABLED else ""
+LOGIN_HTML = r"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in - GifteQChat</title>
+<style>
+  body { margin:0; background:#0d1117; color:#e6edf3; font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif;
+         display:flex; align-items:center; justify-content:center; min-height:100vh; }
+  form { background:#161b22; border:1px solid #30363d; border-radius:12px; padding:32px 28px; width:320px; }
+  h1 { font-size:20px; margin:0 0 14px; }
+  input { width:100%; padding:10px 12px; border-radius:8px; border:1px solid #30363d; background:#0d1117; color:#e6edf3; box-sizing:border-box; }
+  button { margin-top:14px; width:100%; padding:10px; border:0; border-radius:8px; background:#6ea8fe; color:#06122b; font-weight:600; cursor:pointer; }
+  .err { color:#ff7b72; font-size:13px; min-height:18px; margin-top:8px; }
+</style></head>
+<body><form method="post" action="/login">
+  <h1>Sign in</h1>
+  <input type="password" name="password" placeholder="Password" autofocus>
+  <button type="submit">Continue</button>
+  <div class="err">__ERR__</div>
+</form></body></html>"""
+
+ABOUT_HTML = r"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>About - GifteQChat</title>
+<style>
+  :root { --bg:#0d1117; --panel:#161b22; --text:#e6edf3; --muted:#8b949e; --accent:#6ea8fe; --border:#30363d; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.6 system-ui,Segoe UI,Roboto,sans-serif; }
+  .wrap { max-width:780px; margin:0 auto; padding:48px 20px 80px; }
+  h1 { font-size:28px; margin:0 0 4px; }
+  .tag { color:var(--accent); font-weight:600; letter-spacing:.4px; }
+  h2 { font-size:18px; margin:32px 0 8px; border-bottom:1px solid var(--border); padding-bottom:6px; }
+  ul { padding-left:20px; } li { margin:6px 0; }
+  .pill { display:inline-block; background:var(--panel); border:1px solid var(--border); border-radius:999px; padding:3px 10px; font-size:12px; color:var(--muted); margin:2px 4px 2px 0; }
+  a { color:var(--accent); }
+  code { background:var(--panel); padding:1px 6px; border-radius:5px; font-size:13px; }
+  .back { margin-top:40px; }
+</style></head>
+<body><div class="wrap">
+  <div class="tag">LOCAL-FIRST AI AGENT</div>
+  <h1>GifteQChat</h1>
+  <p>A lightweight, framework-free AI chat agent that runs in a single Python process.
+     No LangChain, no vector database, no cloud dependency required.</p>
+
+  <h2>What it does</h2>
+  <ul>
+    <li><b>Chat</b> with any OpenAI-compatible provider (Ollama, Groq, OpenRouter, OpenAI).</li>
+    <li><b>Web search</b> for current facts.</li>
+    <li><b>RAG</b> over your documents — 14+ formats via AnyDoc (docx, pdf, xlsx, pptx, odt, rtf, epub, csv…).</li>
+    <li><b>Long-term memory</b> of facts and preferences you share.</li>
+    <li><b>Sandboxed Python</b> code interpreter with charts, CPU/RAM-limited.</li>
+    <li><b>Sub-agents</b> for research, document analysis, and computation.</li>
+    <li><b>MCP tools</b> — bring your own external tools over stdio, with sandbox + read-only guardrails.</li>
+  </ul>
+
+  <h2>Why it is different</h2>
+  <p>Most agents are either heavy frameworks or opaque SaaS. GifteQChat is:</p>
+  <ul>
+    <li><b>Auditable</b> — every module is a few hundred readable lines.</li>
+    <li><b>Private</b> — runs fully offline on Ollama; no telemetry.</li>
+    <li><b>Zero-infra</b> — one process, no Redis/S3/vector store.</li>
+    <li><b>Safe by design</b> — HTML-escaped rendering (anti-XSS), isolated code sandbox, path sanitization, MCP failure isolation.</li>
+  </ul>
+
+  <h2>Stack</h2>
+  <span class="pill">Python stdlib</span><span class="pill">requests</span><span class="pill">pypdf</span>
+  <span class="pill">matplotlib</span><span class="pill">firecrawl-anydoc</span><span class="pill">MCP</span>
+
+  <h2>Quick start</h2>
+  <p><code>pip install -r requirements.txt</code><br>
+     <code>cp .env.example .env</code> (defaults to local Ollama)<br>
+     <code>python3 webapp.py</code> → http://localhost:8080</p>
+
+  <div class="back"><a href="/">← Back to chat</a></div>
+</div></body></html>"""
+
 
 HTML = r"""<!doctype html>
 <html lang="en">
@@ -129,6 +212,9 @@ HTML = r"""<!doctype html>
   .collapsible-title:hover { color: var(--text); }
   .collapsible-title .chev { font-size: 10px; color: var(--muted); }
   .hidden { display: none !important; }
+  .side-footer { margin: 18px 6px 6px; font-size: 12px; }
+  .side-footer a { color: var(--muted); text-decoration: none; }
+  .side-footer a:hover { color: var(--accent); }
   #convo-list { flex: 1; overflow-y: auto; }
   .convo-row {
     display: flex; align-items: center;
@@ -190,6 +276,12 @@ HTML = r"""<!doctype html>
     color: var(--muted);
   }
   .badge b { color: var(--text); font-weight: 600; }
+  .header-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+  .ghost-btn {
+    background: none; border: 1px solid var(--border); color: var(--muted);
+    border-radius: var(--radius-sm); padding: 5px 12px; font-size: 12px; cursor: pointer;
+  }
+  .ghost-btn:hover { color: var(--text); border-color: var(--accent); background: var(--accent-soft); }
   .status-dot {
     width: 7px; height: 7px; border-radius: 50%;
     background: var(--success); flex-shrink: 0;
@@ -375,6 +467,9 @@ HTML = r"""<!doctype html>
     font-size: 11px; padding: 2px 7px; border-radius: 999px;
     background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent);
   }
+  .msg-tools { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 6px; padding-top: 5px; border-top: 1px dashed var(--border); }
+  .tools-label { font-size: 11px; color: var(--muted); margin-right: 2px; }
+  .tool-status { font-size: 11px; color: var(--accent); margin-bottom: 4px; font-style: italic; }
   .mcp-error { font-size: 11px; color: var(--danger); margin-top: 4px; word-break: break-word; }
   .toast {
     position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
@@ -467,6 +562,7 @@ HTML = r"""<!doctype html>
       <span class="chev" id="mcp-chev">&#9656;</span>
     </div>
     <div id="mcp-list" class="collapsible hidden"><div class="no-convos">No servers configured.</div></div>
+    <div class="side-footer"><a href="/about" target="_blank">About GifteQChat</a></div>
   </aside>
 
   <main>
@@ -482,6 +578,11 @@ HTML = r"""<!doctype html>
         </div>
       </div>
       <div class="badge"><span class="status-dot"></span>Model: <b id="model-badge">loading...</b></div>
+      <div class="header-actions">
+        <button class="ghost-btn" onclick="exportChat()" title="Download current chat as JSON">Export</button>
+        <button class="ghost-btn" onclick="document.getElementById('import-file').click()" title="Load a chat from JSON">Import</button>
+        <input type="file" id="import-file" accept=".json" style="display:none" onchange="importChat(this.files[0]); this.value=''">
+      </div>
     </header>
 
     <div id="messages">
@@ -539,6 +640,34 @@ function load() {
   try { convos = JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch (e) { convos = {}; }
 }
 function save() { localStorage.setItem(LS_KEY, JSON.stringify(convos)); }
+
+function exportChat() {
+  if (!currentId || !convos[currentId]) return;
+  const data = { id: currentId, title: titleOf(convos[currentId].messages), messages: convos[currentId].messages };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "gifteqchat-" + currentId + ".json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function importChat(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      const id = uid();
+      convos[id] = { messages: Array.isArray(data.messages) ? data.messages : [] };
+      save();
+      switchChat(id);
+    } catch (e) {
+      alert("Invalid chat file: " + e.message);
+    }
+  };
+  reader.readAsText(file);
+}
 
 function toggleSidebar() {
   document.getElementById("sidebar").classList.toggle("open");
@@ -731,7 +860,12 @@ function normalizeImages(src, images) {
     : out.replace(deadRef, "\n_(the image could not be generated)_\n");
 }
 
-function messageNode(role, text, note, images) {
+function toolLabel(name) {
+  let n = String(name).replace(/^mcp_[^_]+_/, "").replace(/_/g, " ");
+  return n;
+}
+
+function messageNode(role, text, note, images, tools) {
   const wrap = document.createElement("div");
   wrap.className = "msg " + role;
   const who = document.createElement("div");
@@ -792,12 +926,28 @@ function messageNode(role, text, note, images) {
     }
     wrap.appendChild(actions);
   }
+  if (role === "ai" && tools && tools.length) {
+    const used = document.createElement("div");
+    used.className = "msg-tools";
+    const label = document.createElement("span");
+    label.className = "tools-label";
+    label.textContent = "tools:";
+    used.appendChild(label);
+    for (const t of tools) {
+      const chip = document.createElement("span");
+      chip.className = "tool-chip";
+      chip.textContent = toolLabel(t);
+      chip.title = t;
+      used.appendChild(chip);
+    }
+    wrap.appendChild(used);
+  }
   return wrap;
 }
 
-function addMessage(role, text, note, images) {
+function addMessage(role, text, note, images, tools) {
   const inner = document.getElementById("msg-inner");
-  inner.appendChild(messageNode(role, text, note, images));
+  inner.appendChild(messageNode(role, text, note, images, tools));
   document.getElementById("messages").scrollTop = document.getElementById("messages").scrollHeight;
 }
 
@@ -890,47 +1040,118 @@ async function ask(text) {
   history.push({ role: "user", content: userText });
   save();
 
-  const ctrl = new AbortController();
-  const abortTimer = setTimeout(() => ctrl.abort(), 175000);
+  const payload = { messages: history.map((m) => ({ role: m.role, content: m.content })) };
+  try {
+    const ok = await streamChat(payload, typing);
+    if (!ok) await fallbackChat(payload, typing);
+  } catch (e) {
+    await fallbackChat(payload, typing);
+  } finally {
+    save();
+    renderSidebar();
+    setBusy(false);
+    try { document.getElementById("input").disabled = false; } catch (_) {}
+  }
+}
+
+function scrollBottom() {
+  const m = document.getElementById("messages");
+  m.scrollTop = m.scrollHeight;
+}
+
+async function streamChat(payload, typing) {
+  const bubble = typing.querySelector(".bubble");
+  bubble.innerHTML = "";
+  const status = document.createElement("div");
+  status.className = "tool-status";
+  const textEl = document.createElement("div");
+  bubble.appendChild(status);
+  bubble.appendChild(textEl);
+  let acc = "";
+  try {
+    const res = await fetch("/chat/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error("status " + res.status);
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const chunk = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const line = chunk.split("\n").find((l) => l.startsWith("data: "));
+        if (!line) continue;
+        const data = JSON.parse(line.slice(6));
+        if (data.type === "token") {
+          acc += data.text;
+          textEl.innerHTML = mdToHtml(acc);
+          enhanceCodeBlocks(textEl);
+          typesetMath(textEl);
+          scrollBottom();
+        } else if (data.type === "tool") {
+          status.textContent = "Using " + toolLabel(data.name) + "…";
+        } else if (data.type === "done") {
+          finalizeStream(typing, data);
+          return true;
+        } else if (data.type === "error") {
+          throw new Error(data.text);
+        }
+      }
+    }
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function finalizeStream(typing, data) {
+  typing.remove();
+  if (data.no_key) {
+    showSetup(data.setup);
+    const users = document.querySelectorAll("#msg-inner .msg.user");
+    if (users.length) users[users.length - 1].remove();
+    currentMessages().pop();
+    document.getElementById("welcome").style.display = "";
+    return;
+  }
+  hideSetup();
+  addMessage("ai", data.reply, data.used_docs, data.images, data.tools_used);
+  currentMessages().push({ role: "assistant", content: data.reply, images: data.images || [] });
+  fetchBadge(data.model);
+}
+
+async function fallbackChat(payload, typing) {
   try {
     const res = await fetch("/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      /* Only role/content go to the model: local bookkeeping such as `images`
-         is not part of the chat-completions message schema. */
-      body: JSON.stringify({ messages: history.map((m) => ({ role: m.role, content: m.content })) }),
-      signal: ctrl.signal,
+      body: JSON.stringify(payload),
     });
-    clearTimeout(abortTimer);
     const data = await res.json();
     typing.remove();
     if (data.no_key) {
       showSetup(data.setup);
       const users = document.querySelectorAll("#msg-inner .msg.user");
       if (users.length) users[users.length - 1].remove();
-      history.pop();
+      currentMessages().pop();
       document.getElementById("welcome").style.display = "";
     } else {
       hideSetup();
-      addMessage("ai", data.reply, data.used_docs, data.images);
-      history.push({ role: "assistant", content: data.reply, images: data.images || [] });
+      addMessage("ai", data.reply, data.used_docs, data.images, data.tools_used);
+      currentMessages().push({ role: "assistant", content: data.reply, images: data.images || [] });
       fetchBadge(data.model);
     }
   } catch (e) {
-    clearTimeout(abortTimer);
     typing.remove();
-    if (e.name === "AbortError") {
-      addMessage("ai", "The request took too long. Please try again.");
-      history.pop();
-    } else {
-      addMessage("ai", "Connection error. Is the server still running?");
-      history.pop();
-    }
-  } finally {
-    save();
-    renderSidebar();
-    setBusy(false);
-    try { document.getElementById("input").disabled = false; } catch (_) {}
+    addMessage("ai", "Connection error. Is the server still running?");
+    currentMessages().pop();
   }
 }
 
@@ -1054,6 +1275,18 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
+    def _authed(self):
+        if not AUTH_ENABLED:
+            return True
+        cookie = self.headers.get("Cookie", "")
+        return (SESSION_COOKIE + "=" + SESSION_TOKEN) in cookie
+
+    def _redirect(self, location):
+        self.send_response(303)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def _send(self, code, body, ctype):
         data = body.encode("utf-8")
         self.send_response(code)
@@ -1065,6 +1298,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         route = urlparse(self.path).path
+        # Gate everything except the login page, the public about page and images.
+        if AUTH_ENABLED and not self._authed() and route not in ("/login", "/about") and not route.startswith("/image/"):
+            return self._send(200, LOGIN_HTML.replace("__ERR__", ""), "text/html; charset=utf-8")
+        if route == "/login":
+            return self._send(200, LOGIN_HTML.replace("__ERR__", ""), "text/html; charset=utf-8")
         if self.path in ("/", "/index.html"):
             self._send(200, HTML, "text/html; charset=utf-8")
         elif route.startswith("/image/"):
@@ -1078,13 +1316,38 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "private, max-age=3600")
             self.end_headers()
             raw.write(data)
+        elif route == "/about":
+            self._send(200, ABOUT_HTML, "text/html; charset=utf-8")
         else:
             self._send(404, "Not found", "text/plain")
 
     def do_POST(self):
         route = urlparse(self.path).path
+
+        if route == "/login":
+            try:
+                body = self.rfile.read(int(self.headers.get("Content-Length", 0) or 0)).decode("utf-8")
+                pw = parse_qs(body).get("password", [""])[0]
+            except Exception:
+                pw = ""
+            if pw == AUTH_PASSWORD:
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.send_header("Set-Cookie", f"{SESSION_COOKIE}={SESSION_TOKEN}; Path=/; HttpOnly; SameSite=Lax")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+            else:
+                self._send(200, LOGIN_HTML.replace("__ERR__", "Incorrect password."), "text/html; charset=utf-8")
+            return
+
+        if AUTH_ENABLED and not self._authed():
+            self._send(401, json.dumps({"error": "unauthorized"}), "application/json")
+            return
+
         if route == "/chat":
             return self.chat()
+        if route == "/chat/stream":
+            return self.stream_chat()
         if route == "/upload":
             return self.upload()
         if self.path == "/docs":
@@ -1166,8 +1429,81 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, json.dumps({
             "reply": reply, "images": images, "no_key": False, "model": cfg["model"],
             "used_docs": "search_documents" in tool_trace,
+            "tools_used": tool_trace,
         }), "application/json")
 
+
+    def stream_chat(self):
+        length = int(self.headers.get("Content-Length", 0))
+        try:
+            body = json.loads(self.rfile.read(length))
+        except Exception:
+            self._send(400, json.dumps({"error": "Bad JSON"}), "application/json")
+            return
+        history = [
+            {"role": str(m.get("role", "user")), "content": str(m.get("content") or "")}
+            for m in body.get("messages", [])
+            if isinstance(m, dict)
+        ]
+        cfg = get_config()
+
+        def _sse(payload):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            self.wfile.write(("data: " + json.dumps(payload) + "\n\n").encode("utf-8"))
+            self.wfile.flush()
+
+        if not cfg["api_key"]:
+            setup = ("No API key found.<br>"
+                     "The easy and free way: <code>export AI_AGENT_PROVIDER=ollama</code> "
+                     "(install Ollama first).<br>"
+                     "Or use Groq / OpenRouter: <code>export AI_AGENT_KEY=...</code> "
+                     "and restart the server.")
+            _sse({"type": "done", "no_key": True, "reply": None,
+                  "model": cfg["model"], "setup": setup})
+            return
+        if not history:
+            _sse({"type": "done", "no_key": False, "reply": None, "model": cfg["model"]})
+            return
+
+        messages = [{"role": "system", "content": cfg["system_prompt"]}] + history
+        tool_trace = []
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+        full = []
+        try:
+            for ev in agent.stream_run_with_messages(messages, tool_trace=tool_trace):
+                if ev[0] == "token":
+                    full.append(ev[1])
+                    self.wfile.write(("data: " + json.dumps({"type": "token", "text": ev[1]}) + "\n\n").encode("utf-8"))
+                    self.wfile.flush()
+                elif ev[0] == "tool":
+                    self.wfile.write(("data: " + json.dumps({"type": "tool", "name": ev[1]}) + "\n\n").encode("utf-8"))
+                    self.wfile.flush()
+            reply = "".join(full)
+            for tok in agent.pop_images():
+                if tok not in reply:
+                    reply += "\n\n" + tok
+            tokens = re.findall(r"\[\[IMG:[0-9a-f]+\]\]", reply)
+            images = [{"token": t, "url": "/image/" + quote(t.strip("[]"), safe="")} for t in tokens]
+            self.wfile.write(("data: " + json.dumps({
+                "type": "done", "reply": reply, "images": images,
+                "model": cfg["model"], "used_docs": "search_documents" in tool_trace,
+                "tools_used": tool_trace,
+            }) + "\n\n").encode("utf-8"))
+            self.wfile.flush()
+        except agent.APIError as e:
+            self.wfile.write(("data: " + json.dumps({"type": "error", "text": "Provider error: " + str(e)}) + "\n\n").encode("utf-8"))
+        except Exception as e:
+            self.wfile.write(("data: " + json.dumps({"type": "error", "text": "Unexpected error: " + str(e)}) + "\n\n").encode("utf-8"))
 
 def main():
     cfg = get_config()

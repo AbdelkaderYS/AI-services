@@ -1,0 +1,9 @@
+.env
+data/
+mcp-files/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+venv/
+.venv/

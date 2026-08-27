@@ -41,6 +41,37 @@ WORD_RE = re.compile(r"[a-zA-Z0-9À-ÿ']+", re.UNICODE)
 DOCS = []
 _index = {"chunks": [], "ids": [], "names": [], "terms": [], "dfs": Counter(), "n": 0, "norms": []}
 
+# Optional semantic retrieval (env-gated). When RAG_EMBEDDINGS=1 and
+# sentence-transformers is installed, chunks are also indexed by embedding and
+# retrieve() uses cosine similarity. Otherwise (default) it stays pure TF-IDF.
+EMBEDDINGS_ON = os.environ.get("RAG_EMBEDDINGS") == "1"
+_embed_model = None
+_emb = []        # per-chunk embedding vectors
+_emb_norm = []   # per-chunk L2 norms
+
+
+def _get_embed_model():
+    global _embed_model
+    if _embed_model is not None or not EMBEDDINGS_ON:
+        return _embed_model or None
+    try:
+        from sentence_transformers import SentenceTransformer
+        _embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+    except Exception:
+        _embed_model = False
+    return _embed_model or None
+
+
+def _embed(text):
+    model = _get_embed_model()
+    if not model:
+        return None
+    try:
+        vec = model.encode([text])[0]
+        return [float(x) for x in vec]
+    except Exception:
+        return None
+
 
 def _safe_name(name):
     return os.path.basename(name.replace("\\", "/")).strip() or "unknown.txt"
@@ -203,6 +234,20 @@ def rebuild_index():
         norms.append(math.sqrt(s) or 1.0)
     _index.update({"chunks": chunks, "ids": ids, "names": names, "terms": terms,
                    "dfs": dfs, "n": n, "norms": norms})
+    # Optional semantic index (best-effort; any failure keeps the lexical path).
+    _emb.clear()
+    _emb_norm.clear()
+    if EMBEDDINGS_ON:
+        model = _get_embed_model()
+        if model:
+            try:
+                for v in model.encode(chunks):
+                    v = [float(x) for x in v]
+                    _emb.append(v)
+                    _emb_norm.append(math.sqrt(sum(x * x for x in v)) or 1.0)
+            except Exception:
+                _emb.clear()
+                _emb_norm.clear()
 
 
 def _persist():
@@ -276,6 +321,20 @@ def remove_document(doc_id):
 def retrieve(query, top_k=3):
     if not _index["n"]:
         return []
+    # Semantic path (optional): cosine over chunk embeddings.
+    if EMBEDDINGS_ON and _emb and len(_emb) == _index["n"]:
+        q = _embed(query)
+        if q:
+            qn = math.sqrt(sum(x * x for x in q)) or 1.0
+            scored = []
+            for i, v in enumerate(_emb):
+                dot = sum(a * b for a, b in zip(q, v))
+                if dot:
+                    scored.append((dot / (_emb_norm[i] * qn), i))
+            scored.sort(reverse=True)
+            return [{"text": _index["chunks"][i], "name": _index["names"][i], "score": round(s, 3)}
+                    for s, i in scored[:top_k]]
+    # Lexical fallback (TF-IDF cosine).
     q_tok = Counter(tokenize(query))
     if not q_tok:
         return []

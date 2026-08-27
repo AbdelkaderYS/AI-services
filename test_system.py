@@ -288,10 +288,10 @@ import webapp
 
 UI = webapp.HTML
 check("addMessage forwards images to messageNode",
-      "function addMessage(role, text, note, images)" in UI
-      and "messageNode(role, text, note, images)" in UI)
+       "function addMessage(role, text, note, images, tools)" in UI
+       and "messageNode(role, text, note, images, tools)" in UI)
 check("chat response images reach the renderer",
-      'addMessage("ai", data.reply, data.used_docs, data.images)' in UI)
+       'addMessage("ai", data.reply, data.used_docs, data.images, data.tools_used)' in UI)
 check("images are kept in the stored conversation",
       "images: data.images || []" in UI)
 check("reloading a chat re-renders its images",

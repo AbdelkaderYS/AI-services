@@ -405,6 +405,116 @@ def run_with_messages(messages, tool_trace=None):
     return run_loop(cfg, messages, get_tools(), cfg["max_steps"], tool_trace)
 
 
+def chat_stream(cfg, messages, tools=None, timeout=None, retries=None):
+    """Yield ("token", str) deltas and a final ("message", dict). Raises APIError."""
+    payload = {"model": cfg["model"], "messages": messages, "temperature": cfg["temperature"],
+               "stream": True}
+    if tools:
+        payload["tools"] = tools
+        payload["tool_choice"] = "auto"
+    retries = retries if retries is not None else cfg["max_retries"]
+    timeout = timeout or cfg["timeout"]
+    deadline = time.time() + timeout * (retries + 1) + 2
+    last_err = None
+    for attempt in range(retries + 1):
+        try:
+            r = requests.post(
+                f"{cfg['base_url']}/chat/completions",
+                headers={"Authorization": f"Bearer {cfg['api_key']}", "Content-Type": "application/json"},
+                json=payload, stream=True, timeout=min(timeout, max(5, deadline - time.time())),
+            )
+            if r.status_code < 200 or r.status_code >= 300:
+                detail = r.text[:300]
+                if r.status_code in RETRYABLE_CODES and attempt < retries and time.time() < deadline:
+                    last_err = _parse_http_error(r, r.text)
+                    time.sleep(2 ** attempt)
+                    continue
+                raise APIError(_parse_http_error(r, r.text) + f" ({detail})")
+            content_buf = ""
+            tools_acc = {}
+            for raw in r.iter_lines():
+                if not raw:
+                    continue
+                line = raw.decode("utf-8", "ignore")
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                delta = obj.get("choices", [{}])[0].get("delta", {})
+                if delta.get("content"):
+                    content_buf += delta["content"]
+                    yield ("token", delta["content"])
+                for tc in delta.get("tool_calls") or []:
+                    idx = tc.get("index", 0)
+                    acc = tools_acc.setdefault(idx, {"name": "", "arguments": ""})
+                    fn = tc.get("function", {})
+                    if fn.get("name"):
+                        acc["name"] += fn["name"]
+                    if fn.get("arguments"):
+                        acc["arguments"] += fn["arguments"]
+            message = {"content": content_buf or "", "tool_calls": None}
+            if tools_acc:
+                tcs = []
+                for idx in sorted(tools_acc):
+                    a = tools_acc[idx]
+                    try:
+                        args = json.loads(a["arguments"] or "{}")
+                    except json.JSONDecodeError:
+                        args = {}
+                    tcs.append({"id": f"call_{idx}",
+                                "function": {"name": a["name"], "arguments": json.dumps(args, ensure_ascii=False)}})
+                message["tool_calls"] = tcs
+            yield ("message", message)
+            return
+        except requests.exceptions.ConnectionError as e:
+            last_err = f"Connection error: {e}"
+        except requests.exceptions.Timeout as e:
+            last_err = f"Request timed out ({timeout}s): {e}"
+        if attempt < retries and time.time() < deadline:
+            time.sleep(2 ** attempt)
+    raise APIError(last_err)
+
+
+def run_loop_stream(cfg, messages, tools, max_steps, tool_trace=None):
+    msgs = list(messages)
+    for _ in range(max_steps):
+        msg = None
+        for ev in chat_stream(cfg, msgs, tools):
+            if ev[0] == "message":
+                msg = ev[1]
+        if msg is None:
+            return
+        msgs.append({"role": "assistant", "content": msg.get("content") or "",
+                     "tool_calls": msg.get("tool_calls")})
+        if not msg.get("tool_calls"):
+            return
+        for tc in msg.get("tool_calls") or []:
+            raw_args = tc.get("function", {}).get("arguments") or "{}"
+            try:
+                args = json.loads(raw_args)
+            except json.JSONDecodeError:
+                args = {}
+            name = tc.get("function", {}).get("name", "?")
+            if tool_trace is not None:
+                tool_trace.append(name)
+            yield ("tool", name)
+            result = call_tool(name, args)
+            msgs.append({"role": "tool", "tool_call_id": tc.get("id"),
+                         "content": json.dumps(result, ensure_ascii=False)})
+    yield ("message", {"content": "(max steps reached)", "tool_calls": None})
+
+
+def stream_run_with_messages(messages, tool_trace=None):
+    cfg = get_config()
+    _ctx.images = []
+    yield from run_loop_stream(cfg, messages, get_tools(), cfg["max_steps"], tool_trace)
+
+
 def delegate_task(role, task):
     role_def = SUBAGENTS.get(role)
     if not role_def:
