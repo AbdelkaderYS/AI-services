@@ -49,12 +49,11 @@ def _check_sandbox(srv, args):
         for v in (val if isinstance(val, list) else [val]):
             if not isinstance(v, str) or not v.strip():
                 continue
-            try:
-                target = os.path.realpath(os.path.abspath(v))
-            except Exception:
-                return f"Refusing '{v}': cannot resolve path."
-            if target != srv.sandbox and not target.startswith(srv.sandbox + os.sep):
-                return (f"Refusing '{v}': outside the sandbox '{srv.sandbox}'. "
+            raw = v.strip()
+            # Relative paths resolve against the sandbox root, not the cwd.
+            candidate = os.path.realpath(raw if os.path.isabs(raw) else os.path.join(srv.sandbox, raw))
+            if candidate != srv.sandbox and not candidate.startswith(srv.sandbox + os.sep):
+                return (f"Refusing '{raw}': outside the sandbox '{srv.sandbox}'. "
                         f"Filesystem access is confined to that directory.")
     return None
 

@@ -365,6 +365,13 @@ HTML = r"""<!doctype html>
     background: none; border: none; color: var(--muted); border-radius: var(--radius-sm); padding: 4px;
   }
   .doc-item .del:hover { color: var(--danger); background: var(--danger-soft); }
+  .doc-row { display: flex; align-items: center; gap: 6px; }
+  .mcp-tools { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+  .tool-chip {
+    font-size: 11px; padding: 2px 7px; border-radius: 999px;
+    background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent);
+  }
+  .mcp-error { font-size: 11px; color: var(--danger); margin-top: 4px; word-break: break-word; }
   .toast {
     position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
     background: var(--text); color: #fff; padding: 10px 18px;
@@ -809,15 +816,35 @@ async function refreshMcp() {
   for (const s of servers) {
     const item = document.createElement("div");
     item.className = "doc-item";
+    const row = document.createElement("div");
+    row.className = "doc-row";
     const dot = document.createElement("span");
     dot.className = "status-dot";
     dot.style.background = s.ok ? "var(--success)" : "var(--danger)";
     const name = document.createElement("span");
     name.className = "doc-name";
-    name.textContent = s.server_name ? `${s.name} (${s.tools.length} tools)` : s.name;
-    name.title = s.ok ? `${s.name}: ${s.tools.join(", ") || "no tools"}` : s.error;
-    item.appendChild(dot);
-    item.appendChild(name);
+    name.textContent = s.server_name ? s.server_name : s.name;
+    name.title = s.ok ? "" : s.error;
+    row.appendChild(dot);
+    row.appendChild(name);
+    item.appendChild(row);
+    if (s.ok && s.tools && s.tools.length) {
+      const tools = document.createElement("div");
+      tools.className = "mcp-tools";
+      for (const t of s.tools) {
+        const chip = document.createElement("span");
+        chip.className = "tool-chip";
+        chip.textContent = t.replace(/^mcp_[^_]+_/, "");
+        chip.title = t;
+        tools.appendChild(chip);
+      }
+      item.appendChild(tools);
+    } else if (!s.ok) {
+      const err = document.createElement("div");
+      err.className = "mcp-error";
+      err.textContent = s.error;
+      item.appendChild(err);
+    }
     list.appendChild(item);
   }
 }

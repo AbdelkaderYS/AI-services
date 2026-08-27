@@ -50,7 +50,11 @@ DEFAULT_CONFIG = {
         "'researcher' for web research, 'doc_analyst' for questions about the user's documents, "
         "'analyst' for calculations or code execution. Give each one a clear, self-contained task; "
         "then combine their reports into your final answer. "
-        "Answer directly when no tool is needed. Be concise."
+        "Answer directly when no tool is needed. Be concise. "
+        "Never use Markdown tables; present comparisons or structured information "
+        "as bullet lists, numbered lists, or short prose instead. "
+        "When a file tool reports an absolute path, include that full path in your "
+        "reply so the user knows exactly where the file lives."
     ),
     "temperature": 0.3,
     "max_retries": 3,
