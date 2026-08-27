@@ -232,10 +232,30 @@ SUBAGENTS = {
 }
 
 
+def _make_strict(spec):
+    """Normalize a tool spec so strict schema providers (e.g. Groq) accept it and
+    the model emits conformant arguments. Safe to call on every spec."""
+    fn = spec.get("function", spec)
+    params = fn.get("parameters") or {}
+    if params.get("type") == "object" and "properties" in params:
+        props = params.setdefault("properties", {})
+        params["additionalProperties"] = False
+        req = params.setdefault("required", list(props.keys()))
+        for p in props:
+            if p not in req:
+                req.append(p)
+    fn["strict"] = True
+    return spec
+
+
 def get_tools(include_delegate=True):
-    if include_delegate:
-        return list(BASE_TOOLS) + mcp_client.tool_specs()
-    return [t for t in BASE_TOOLS if t["function"]["name"] != "delegate_task"] + mcp_client.tool_specs()
+    base = list(BASE_TOOLS) if include_delegate else [t for t in BASE_TOOLS if t["function"]["name"] != "delegate_task"]
+    tools = [_make_strict(t) for t in base]
+    try:
+        tools += [_make_strict(t) for t in mcp_client.tool_specs()]
+    except Exception:
+        pass
+    return tools
 
 
 def _tools_for_roles(allow):
@@ -376,8 +396,17 @@ def chat(cfg, messages, tools=None, timeout=None, retries=None):
 
 def run_loop(cfg, messages, tools, max_steps, tool_trace=None):
     msgs = list(messages)
+    toolset = tools
     for _ in range(max_steps):
-        msg = chat(cfg, msgs, tools)
+        try:
+            msg = chat(cfg, msgs, toolset)
+        except APIError:
+            # Provider rejected the request (often a malformed tool call under strict
+            # schema validation). Retry without tools so the model answers directly.
+            if toolset:
+                toolset = []
+                continue
+            raise
         msgs.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": msg.get("tool_calls")})
         if not msg.get("tool_calls"):
             return msg.get("content") or "(The model returned an empty response. Try rephrasing.)"
@@ -482,13 +511,22 @@ def chat_stream(cfg, messages, tools=None, timeout=None, retries=None):
 
 def run_loop_stream(cfg, messages, tools, max_steps, tool_trace=None):
     msgs = list(messages)
+    toolset = tools
     for _ in range(max_steps):
         msg = None
-        for ev in chat_stream(cfg, msgs, tools):
-            if ev[0] == "token":
-                yield ("token", ev[1])
-            elif ev[0] == "message":
-                msg = ev[1]
+        try:
+            for ev in chat_stream(cfg, msgs, toolset):
+                if ev[0] == "token":
+                    yield ("token", ev[1])
+                elif ev[0] == "message":
+                    msg = ev[1]
+        except APIError:
+            # Provider rejected the request (often a malformed tool call under strict
+            # schema validation). Retry without tools so the model answers directly.
+            if toolset:
+                toolset = []
+                continue
+            raise
         if msg is None:
             return
         msgs.append({"role": "assistant", "content": msg.get("content") or "",
