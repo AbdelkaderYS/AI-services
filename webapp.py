@@ -1020,6 +1020,24 @@ function scrollBottom() {
   m.scrollTop = m.scrollHeight;
 }
 
+/* Hide a 'thinking' model's <think> reasoning and any raw tool-call markup it
+   leaks into the stream (e.g. <tool_code>...). The real answer is shown; the
+   thinking/tools are processed server-side, not as visible prose. */
+function stripLeak(raw) {
+  let s = raw || "";
+  const t = s.indexOf("<think>");
+  if (t !== -1) {
+    const c = s.indexOf("</think>", t);
+    if (c === -1) return s.slice(0, t);   // thinking in progress: hide it live
+    s = s.slice(0, t) + s.slice(c + "</think>".length);
+  }
+  s = s.replace(/<tool_code>[\s\S]*?<\/tool_code>/g, "")
+       .replace(/<function_calls>[\s\S]*?<\/function_calls>/g, "")
+       .replace(/<invoke[\s\S]*?<\/invoke>/g, "")
+       .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "");
+  return s;
+}
+
 async function streamChat(payload, typing) {
   const bubble = typing.querySelector(".bubble");
   bubble.innerHTML = "";
@@ -1052,7 +1070,7 @@ async function streamChat(payload, typing) {
         const data = JSON.parse(line.slice(6));
         if (data.type === "token") {
           acc += data.text;
-          textEl.innerHTML = mdToHtml(acc);
+          textEl.innerHTML = mdToHtml(stripLeak(acc));
           enhanceCodeBlocks(textEl);
           typesetMath(textEl);
           scrollBottom();
@@ -1232,6 +1250,23 @@ window.addEventListener("load", () => {
 """
 
 
+def _clean_reply(text):
+    """Strip reasoning (`<think>`) and raw tool-call markup (`<tool_code>`, etc.)
+    that some 'thinking' models leak into the visible text. Code fences are left
+    intact; only the specific known tags are removed."""
+    if not text:
+        return text
+    s = text
+    s = re.sub(r"<think>.*?</think>", "", s, flags=re.DOTALL)
+    for tag in ("tool_code", "function_calls", "tool_call", "invoke"):
+        s = re.sub(r"<" + tag + r"[^>]*>.*?</" + tag + r">", "", s, flags=re.DOTALL)
+    # Drop any trailing, not-yet-closed block (e.g. mid-stream thinking).
+    s = re.sub(r"<think>.*$", "", s, flags=re.DOTALL)
+    s = re.sub(r"<tool_code>.*$", "", s, flags=re.DOTALL)
+    s = re.sub(r"<function_calls>.*$", "", s, flags=re.DOTALL)
+    return s.strip()
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
@@ -1380,6 +1415,7 @@ class Handler(BaseHTTPRequestHandler):
             reply = f"Provider error: {e}"
         except Exception as e:
             reply = f"Unexpected error: {e}"
+        reply = _clean_reply(reply)
         # Deterministic display: append any chart the tools produced, whether or
         # not the model copied the [[IMG:...]] marker into its prose.
         for tok in agent.pop_images():
@@ -1452,6 +1488,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.write(("data: " + json.dumps({"type": "tool", "name": ev[1]}) + "\n\n").encode("utf-8"))
                     self.wfile.flush()
             reply = "".join(full)
+            reply = _clean_reply(reply)
             for tok in agent.pop_images():
                 if tok not in reply:
                     reply += "\n\n" + tok

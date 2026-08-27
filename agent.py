@@ -362,6 +362,8 @@ def _parse_http_error(r, body):
 
 def chat(cfg, messages, tools=None, timeout=None, retries=None):
     payload = {"model": cfg["model"], "messages": messages, "temperature": cfg["temperature"]}
+    if cfg.get("provider") == "groq" and "qwen" in cfg["model"].lower():
+        payload["enable_thinking"] = False
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
@@ -438,6 +440,8 @@ def chat_stream(cfg, messages, tools=None, timeout=None, retries=None):
     """Yield ("token", str) deltas and a final ("message", dict). Raises APIError."""
     payload = {"model": cfg["model"], "messages": messages, "temperature": cfg["temperature"],
                "stream": True}
+    if cfg.get("provider") == "groq" and "qwen" in cfg["model"].lower():
+        payload["enable_thinking"] = False
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
