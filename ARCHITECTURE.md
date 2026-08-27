@@ -1,4 +1,4 @@
-# Architecture — AI Services
+# Architecture : AI Services
 
 Agent IA conversationnel **sans framework** : boucle tool-calling maison, multi-provider,
 RAG sur documents, mémoire long terme, interpréteur de code sandboxé avec affichage de
@@ -94,7 +94,7 @@ le token. L'affichage ne dépend pas de la discipline du modèle.
 
 ## 3. L'orchestrateur (`agent.py`)
 
-- **Multi-provider** : Ollama, Groq, OpenRouter, OpenAI — toute API compatible OpenAI
+- **Multi-provider** : Ollama, Groq, OpenRouter, OpenAI : toute API compatible OpenAI
   (`/chat/completions`), sélection par variables d'environnement.
 - **Boucle d'outils** (`run_loop`) : jusqu'à `max_steps` allers-retours ; chaque
   `tool_call` est exécuté puis renvoyé au modèle au format `role: tool`.
@@ -169,7 +169,7 @@ Pourquoi ce design :
    kill automatique du code fou, backend matplotlib forcé en `Agg` (headless).
 2. **Contexte LLM** : un graphique de 500 Ko en base64 coûterait ~170 000 tokens ;
    le modèle ne voit qu'un token de 14 caractères.
-3. **Fiabilité** : buffer thread-local + `pop_images()` — l'image s'affiche même si le
+3. **Fiabilité** : buffer thread-local + `pop_images()` : l'image s'affiche même si le
    modèle paraphrase le token en `![...](fichier.png)` (normalisé côté client).
 
 ---
@@ -196,7 +196,7 @@ sequenceDiagram
 
 - Protocole : JSON-RPC 2.0 sur stdin/stdout, lecteur asynchrone par serveur.
 - **Isolation des pannes** : un serveur qui refuse de démarrer est affiché en rouge dans
-  la sidebar et sauté — jamais d'impact sur le reste de l'app.
+  la sidebar et sauté : jamais d'impact sur le reste de l'app.
 - Sans `data/mcp.json`, la fonctionnalité reste simplement éteinte.
 
 ---
@@ -228,7 +228,7 @@ hors ligne, la notation brute reste lisible.
 | Images générées | mémoire vive, FIFO 30 | perdue au redémarrage |
 | Connexions MCP | processus fils | relancées à chaque démarrage |
 
-## 9. Sécurité — mesures en place
+## 9. Sécurité : mesures en place
 
 | Risque | Parade |
 |---|---|

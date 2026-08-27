@@ -67,20 +67,20 @@ ABOUT_HTML = r"""<!doctype html>
   <ul>
     <li><b>Chat</b> with any OpenAI-compatible provider (Ollama, Groq, OpenRouter, OpenAI).</li>
     <li><b>Web search</b> for current facts.</li>
-    <li><b>RAG</b> over your documents — 14+ formats via AnyDoc (docx, pdf, xlsx, pptx, odt, rtf, epub, csv…).</li>
+    <li><b>RAG</b> over your documents : 14+ formats via AnyDoc (docx, pdf, xlsx, pptx, odt, rtf, epub, csv…).</li>
     <li><b>Long-term memory</b> of facts and preferences you share.</li>
     <li><b>Sandboxed Python</b> code interpreter with charts, CPU/RAM-limited.</li>
     <li><b>Sub-agents</b> for research, document analysis, and computation.</li>
-    <li><b>MCP tools</b> — bring your own external tools over stdio, with sandbox + read-only guardrails.</li>
+    <li><b>MCP tools</b> : bring your own external tools over stdio, with sandbox + read-only guardrails.</li>
   </ul>
 
   <h2>Why it is different</h2>
   <p>Most agents are either heavy frameworks or opaque SaaS. GifteQChat is:</p>
   <ul>
-    <li><b>Auditable</b> — every module is a few hundred readable lines.</li>
-    <li><b>Private</b> — runs fully offline on Ollama; no telemetry.</li>
-    <li><b>Zero-infra</b> — one process, no Redis/S3/vector store.</li>
-    <li><b>Safe by design</b> — HTML-escaped rendering (anti-XSS), isolated code sandbox, path sanitization, MCP failure isolation.</li>
+    <li><b>Auditable</b> : every module is a few hundred readable lines.</li>
+    <li><b>Private</b> : runs fully offline on Ollama; no telemetry.</li>
+    <li><b>Zero-infra</b> : one process, no Redis/S3/vector store.</li>
+    <li><b>Safe by design</b> : HTML-escaped rendering (anti-XSS), isolated code sandbox, path sanitization, MCP failure isolation.</li>
   </ul>
 
   <h2>Stack</h2>
@@ -276,12 +276,6 @@ HTML = r"""<!doctype html>
     color: var(--muted);
   }
   .badge b { color: var(--text); font-weight: 600; }
-  .header-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
-  .ghost-btn {
-    background: none; border: 1px solid var(--border); color: var(--muted);
-    border-radius: var(--radius-sm); padding: 5px 12px; font-size: 12px; cursor: pointer;
-  }
-  .ghost-btn:hover { color: var(--text); border-color: var(--accent); background: var(--accent-soft); }
   .status-dot {
     width: 7px; height: 7px; border-radius: 50%;
     background: var(--success); flex-shrink: 0;
@@ -578,11 +572,6 @@ HTML = r"""<!doctype html>
         </div>
       </div>
       <div class="badge"><span class="status-dot"></span>Model: <b id="model-badge">loading...</b></div>
-      <div class="header-actions">
-        <button class="ghost-btn" onclick="exportChat()" title="Download current chat as JSON">Export</button>
-        <button class="ghost-btn" onclick="document.getElementById('import-file').click()" title="Load a chat from JSON">Import</button>
-        <input type="file" id="import-file" accept=".json" style="display:none" onchange="importChat(this.files[0]); this.value=''">
-      </div>
     </header>
 
     <div id="messages">
@@ -640,34 +629,6 @@ function load() {
   try { convos = JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch (e) { convos = {}; }
 }
 function save() { localStorage.setItem(LS_KEY, JSON.stringify(convos)); }
-
-function exportChat() {
-  if (!currentId || !convos[currentId]) return;
-  const data = { id: currentId, title: titleOf(convos[currentId].messages), messages: convos[currentId].messages };
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "gifteqchat-" + currentId + ".json";
-  a.click();
-  URL.revokeObjectURL(a.href);
-}
-
-function importChat(file) {
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      const data = JSON.parse(reader.result);
-      const id = uid();
-      convos[id] = { messages: Array.isArray(data.messages) ? data.messages : [] };
-      save();
-      switchChat(id);
-    } catch (e) {
-      alert("Invalid chat file: " + e.message);
-    }
-  };
-  reader.readAsText(file);
-}
 
 function toggleSidebar() {
   document.getElementById("sidebar").classList.toggle("open");
@@ -1452,8 +1413,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("X-Accel-Buffering", "no")
-            self.send_header("Connection", "keep-alive")
+            self.send_header("Connection", "close")
             self.end_headers()
+            self.close_connection = True
             self.wfile.write(("data: " + json.dumps(payload) + "\n\n").encode("utf-8"))
             self.wfile.flush()
 
@@ -1476,8 +1438,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Accel-Buffering", "no")
-        self.send_header("Connection", "keep-alive")
+        self.send_header("Connection", "close")
         self.end_headers()
+        self.close_connection = True
         full = []
         try:
             for ev in agent.stream_run_with_messages(messages, tool_trace=tool_trace):

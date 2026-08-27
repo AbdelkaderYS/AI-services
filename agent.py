@@ -485,13 +485,16 @@ def run_loop_stream(cfg, messages, tools, max_steps, tool_trace=None):
     for _ in range(max_steps):
         msg = None
         for ev in chat_stream(cfg, msgs, tools):
-            if ev[0] == "message":
+            if ev[0] == "token":
+                yield ("token", ev[1])
+            elif ev[0] == "message":
                 msg = ev[1]
         if msg is None:
             return
         msgs.append({"role": "assistant", "content": msg.get("content") or "",
                      "tool_calls": msg.get("tool_calls")})
         if not msg.get("tool_calls"):
+            yield ("message", msg)
             return
         for tc in msg.get("tool_calls") or []:
             raw_args = tc.get("function", {}).get("arguments") or "{}"
