@@ -127,4 +127,123 @@ flowchart LR
 - Max 5 documents, déduplication par nom, persistance JSON, rechargement à chaud.
 - Sanitisation des noms de fichiers (anti path traversal).
 
-<!-- PART2 -->
+### Sous-agents (`delegate_task`)
+
+```mermaid
+flowchart TB
+    ORCH["Orchestrateur<br/>tous les outils + MCP"]
+    ORCH -- "delegate_task(role, task)" --> R["researcher<br/>web_search"]
+    ORCH -- "delegate_task(role, task)" --> D["doc_analyst<br/>search_documents"]
+    ORCH -- "delegate_task(role, task)" --> AN["analyst<br/>run_python"]
+    R --> REP1["Rapport synthetique"]
+    D --> REP2["Citations des documents"]
+    AN --> REP3["Resultats calcules"]
+    REP1 --> ORCH
+    REP2 --> ORCH
+    REP3 --> ORCH
+```
+
+- Chaque sous-agent a son **system prompt** dédié et une **allow-list d'outils stricte**.
+- `delegate_task` n'existe pas dans leur outillage : la récursion est impossible par construction.
+- Budget propre : 6 étapes maximum, trace des outils utilisés renvoyée à l'orchestrateur.
+
+---
+
+## 5. Sandbox & pipeline d'images
+
+```mermaid
+flowchart LR
+    A["Le modele ecrit un script"] --> B["sandbox.run_python()"]
+    B --> C["main.py dans un tmpdir jetable"]
+    C --> D["Interpreteure isole<br/>python -I (no user site)<br/>cwd = tmpdir · env minimal<br/>RLIMIT_CPU + RLIMIT_AS 512 Mo<br/>timeout 15 s -> kill"]
+    D --> E["stdout / stderr tronques 6000 car."]
+    D --> F["Collecte PNG / JPG produits"]
+    F --> G["media.store_bytes()<br/>token md5 unique - FIFO 30"]
+    G --> H["resultat : token image court<br/>(les octets ne passent JAMAIS dans le LLM)"]
+    H --> I["webapp : GET /image/IMG:x<br/>img affichee dans la bulle"]
+```
+
+Pourquoi ce design :
+
+1. **Sécurité** : pas de `exec()` dans le processus serveur ; CPU/RAM plafonnés (POSIX),
+   kill automatique du code fou, backend matplotlib forcé en `Agg` (headless).
+2. **Contexte LLM** : un graphique de 500 Ko en base64 coûterait ~170 000 tokens ;
+   le modèle ne voit qu'un token de 14 caractères.
+3. **Fiabilité** : buffer thread-local + `pop_images()` — l'image s'affiche même si le
+   modèle paraphrase le token en `![...](fichier.png)` (normalisé côté client).
+
+---
+
+## 6. Outils externes MCP (`mcp_client.py`)
+
+```mermaid
+sequenceDiagram
+    participant A as agent.py
+    participant M as mcp_client.py
+    participant S as Serveur MCP (stdio)
+
+    Note over M: chargement paresseux de data/mcp.json
+    M->>S: spawn du process
+    M->>S: initialize (JSON-RPC 2.0)
+    S-->>M: capabilities + serverInfo
+    M->>S: notifications/initialized
+    M->>S: tools/list
+    S-->>M: schemas -> noms mcp_<serveur>_<outil>
+    A->>M: route_call(nom, args)
+    M->>S: tools/call
+    S-->>M: content texte -> resultat JSON
+```
+
+- Protocole : JSON-RPC 2.0 sur stdin/stdout, lecteur asynchrone par serveur.
+- **Isolation des pannes** : un serveur qui refuse de démarrer est affiché en rouge dans
+  la sidebar et sauté — jamais d'impact sur le reste de l'app.
+- Sans `data/mcp.json`, la fonctionnalité reste simplement éteinte.
+
+---
+
+## 7. Rendu côté client
+
+```mermaid
+flowchart LR
+    A["Texte brut du modele"] --> B["normalizeImages()<br/>deplie les images Markdown"]
+    B --> C["decoupage sur les tokens image"]
+    C --> D["mdToHtml() par segment<br/>1. echappement HTML complet<br/>2. gras / italique / code<br/>titres / listes / blocs de code"]
+    D --> E["insertion des img"]
+    E --> F["KaTeX auto-render<br/>formules inline et blocs"]
+    F --> G["Bulle finale"]
+```
+
+L'échappement HTML précède toujours l'injection de balises : aucun contenu (modèle ou
+utilisateur) ne peut exécuter de JavaScript (anti-XSS). KaTeX charge depuis un CDN ;
+hors ligne, la notation brute reste lisible.
+
+## 8. Persistance
+
+| Donnée | Stockage | Volatilité |
+|---|---|---|
+| Conversations | `localStorage` (navigateur) | persistant |
+| Documents RAG | `data/documents.json` | persistant |
+| Mémoires | `data/memory.json` | persistant |
+| Config MCP | `data/mcp.json` (gitignore) | persistant |
+| Images générées | mémoire vive, FIFO 30 | perdue au redémarrage |
+| Connexions MCP | processus fils | relancées à chaque démarrage |
+
+## 9. Sécurité — mesures en place
+
+| Risque | Parade |
+|---|---|
+| Code arbitraire via `run_python` | subprocess isolé `-I`, rlimits CPU/RAM, timeout + kill, cwd jetable |
+| Path traversal (upload) | sanitisation `basename`, extensions whitelistées, max 5 docs |
+| XSS via réponses du modèle | échappement HTML systématique avant rendu, balises contrôlées uniquement |
+| Satération du contexte LLM | sortie tronquée à 6000 car., images réduites à des tokens |
+| Crash par serveur MCP défaillant | isolation par try/except, statut visible, app toujours fonctionnelle |
+
+## 10. Choix d'architecture
+
+- **Sans framework** (pas de LangChain/LlamaIndex) : chaque brique fait ~100-300 lignes
+  lisibles ; comportement 100 % prévisible et débogable.
+- **Un seul process** : zéro dépendance d'infra (pas de Redis/S3/vecteurs externes) ;
+  l'index TF-IDF maison suffit à cette échelle (≤ 5 docs).
+- **Tests de bout en bout** (`test_system.py`) : y compris un faux serveur MCP complet
+  qui valide le protocole JSON-RPC sans réseau.
+

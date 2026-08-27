@@ -4,6 +4,13 @@
       "command": "uvx",
       "args": ["mcp-server-fetch"],
       "call_timeout": 30
+    },
+    "fs": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "./mcp-files"],
+      "call_timeout": 30,
+      "read_only": true,
+      "sandbox": "./mcp-files"
     }
   }
 }

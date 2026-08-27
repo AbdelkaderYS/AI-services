@@ -3,7 +3,9 @@
 A light AI agent with a chat web interface. No framework. Works with any OpenAI-compatible API.
 
 Features: chat, web search, RAG on your documents, long-term memory, a sandboxed Python
-code interpreter, specialist sub-agents with task delegation, and MCP tool servers.
+code interpreter with inline charts, specialist sub-agents with task delegation, and MCP tool servers.
+
+> Full system design with diagrams: [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ## Getting started (Windows + VS Code)
 
@@ -120,7 +122,8 @@ Groq models you can use in `AI_AGENT_MODEL`: `qwen/qwen3.6-27b` (default), `open
 2. Tick **Ask my documents**
 3. Questions are answered from your documents
 
-Formats: `.txt .md .csv .json .log .py .docx .pdf`.
+Formats (via [AnyDoc](https://github.com/firecrawl/anydoc)): `.txt .md .csv .json .log .py`, plus office formats
+`.doc .docx .docm .xls .xlsx .xlsm .xlsb .ppt .pptx .pps .pot .pptm .ppsx .ppsm .odt .ods .odp .rtf .epub` and `.pdf`.
 Documents are saved in `data/documents.json` and survive restarts (this file is gitignored, so it stays local).
 
 ## Code interpreter (`run_python`)

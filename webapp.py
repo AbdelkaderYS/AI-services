@@ -449,10 +449,8 @@ HTML = r"""<!doctype html>
       <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
       Upload a document
     </button>
-    <input type="file" id="file" multiple accept=".txt,.md,.csv,.json,.log,.docx,.pdf" style="display:none" onchange="uploadFiles(this.files); this.value=''">
+    <input type="file" id="file" multiple accept=".txt,.md,.markdown,.csv,.json,.log,.py,.doc,.docx,.docm,.xls,.xlsx,.xlsm,.xlsb,.ppt,.pptx,.pps,.pot,.pptm,.ppsx,.ppsm,.odt,.ods,.odp,.rtf,.epub,.pdf" style="display:none" onchange="uploadFiles(this.files); this.value=''">
     <div id="doc-list"></div>
-    <div class="sidebar-title">Memories</div>
-    <div id="memory-list"><div class="no-convos">Nothing remembered yet.</div></div>
     <div class="sidebar-title">MCP servers</div>
     <div id="mcp-list"><div class="no-convos">No servers configured.</div></div>
   </aside>
@@ -889,7 +887,6 @@ async function ask(text) {
   } finally {
     save();
     renderSidebar();
-    refreshMemories();
     setBusy(false);
     try { document.getElementById("input").disabled = false; } catch (_) {}
   }
@@ -986,44 +983,6 @@ async function refreshDocs() {
   }
 }
 
-async function refreshMemories() {
-  let data;
-  try {
-    const r = await fetch("/memories", { method: "POST" });
-    data = await r.json();
-  } catch (e) { return; }
-  const mems = data.memories || [];
-  const list = document.getElementById("memory-list");
-  if (!mems.length) {
-    list.innerHTML = '<div class="no-convos">Nothing remembered yet.</div>';
-  } else {
-    list.innerHTML = "";
-    for (const m of mems) {
-      const item = document.createElement("div");
-      item.className = "doc-item";
-      const text = document.createElement("span");
-      text.className = "doc-name";
-      text.textContent = m.text;
-      text.title = m.text;
-      const del = document.createElement("button");
-      del.className = "del";
-      del.innerHTML = TRASH_ICON;
-      del.title = "Forget";
-      del.onclick = async () => {
-        await fetch("/memories/del", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: m.id }),
-        });
-        refreshMemories();
-      };
-      item.appendChild(text);
-      item.appendChild(del);
-      list.appendChild(item);
-    }
-  }
-}
-
 const area = document.getElementById("input");
 area.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMsg(); }
@@ -1037,7 +996,6 @@ load();
 if (!Object.keys(convos).length) newChat(); else switchChat(Object.keys(convos)[Object.keys(convos).length - 1]);
 fetchBadge(null);
 refreshDocs();
-refreshMemories();
 refreshMcp();
 
 /* KaTeX loads with defer, i.e. after this script: typeset history once ready. */

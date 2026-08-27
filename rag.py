@@ -9,7 +9,20 @@ MAX_DOCS = 5
 DATA_DIR = "data"
 STORE_PATH = os.path.join(DATA_DIR, "documents.json")
 
-TEXT_EXTS = {".txt", ".md", ".markdown", ".csv", ".json", ".log", ".text", ".py"}
+TEXT_EXTS = {".txt", ".md", ".markdown", ".json", ".log", ".text", ".py"}
+
+# Formats handled by AnyDoc (Firecrawl) when available. AnyDoc converts them to
+# clean GitHub-Flavored Markdown, covering office formats the legacy parsers can't.
+ANYDOC_EXTS = {
+    ".doc", ".docm", ".docx",
+    ".xls", ".xlsx", ".xlsm", ".xlsb",
+    ".ppt", ".pptx", ".pps", ".pot", ".pptm", ".ppsx", ".ppsm",
+    ".odt", ".ods", ".odp",
+    ".rtf", ".epub",
+    ".pdf", ".csv",
+}
+
+# Legacy hand-rolled parsers, kept as a fallback when AnyDoc is not installed.
 PDF_EXTS = {".pdf"}
 DOCX_EXTS = {".docx"}
 
@@ -34,7 +47,7 @@ def _safe_name(name):
 
 
 def supported_doc():
-    return TEXT_EXTS | PDF_EXTS | DOCX_EXTS
+    return TEXT_EXTS | ANYDOC_EXTS
 
 
 def tokenize(text):
@@ -69,6 +82,33 @@ def parse_pdf(data):
         return None, f"Could not read PDF: {e}"
 
 
+def parse_anydoc(name, data):
+    """Convert a document to Markdown via AnyDoc. Returns (text, error)."""
+    try:
+        import anydoc
+    except ImportError:
+        return None, "anydoc is not installed. Run: pip install firecrawl-anydoc"
+    try:
+        # AnyDoc detects most formats from the bytes, but signature-less formats
+        # (e.g. CSV) need an explicit hint resolved from the extension.
+        fmt = None
+        ext = "." + name.rsplit(".", 1)[-1].lower() if "." in name else ""
+        try:
+            resolved = anydoc.format_from_extension(ext)
+            if resolved is not None:
+                fmt = resolved
+        except Exception:
+            fmt = None
+        out = anydoc.to_markdown_bytes(data, fmt)
+        if isinstance(out, bytes):
+            out = out.decode("utf-8", "ignore")
+        if not out or not out.strip():
+            return None, "AnyDoc produced no text for this file."
+        return out, None
+    except Exception as e:
+        return None, f"AnyDoc could not convert this file: {e}"
+
+
 def parse_file(name, data):
     ext = "." + name.rsplit(".", 1)[-1].lower() if "." in name else ""
     if ext in TEXT_EXTS:
@@ -76,10 +116,25 @@ def parse_file(name, data):
             return data.decode("utf-8"), None
         except UnicodeDecodeError:
             return data.decode("latin-1", "ignore"), None
-    if ext in DOCX_EXTS:
-        return parse_docx(data)
-    if ext in PDF_EXTS:
-        return parse_pdf(data)
+
+    # Try AnyDoc first for every office/PDF/CSV format it supports.
+    if ext in ANYDOC_EXTS:
+        text, err = parse_anydoc(name, data)
+        if text:
+            return text, None
+        # Fall back to the legacy parsers for the two formats they cover.
+        if ext in PDF_EXTS:
+            text, ferr = parse_pdf(data)
+            if text:
+                return text, None
+            return None, ferr or err
+        if ext in DOCX_EXTS:
+            text, ferr = parse_docx(data)
+            if text:
+                return text, None
+            return None, ferr or err
+        return None, err
+
     return None, f"Unsupported file type: '{ext or name}'. Use: {', '.join(sorted(supported_doc())[:6])}"
 
 

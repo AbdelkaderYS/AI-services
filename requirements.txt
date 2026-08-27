@@ -2,3 +2,4 @@ requests>=2.31
 pypdf>=4.0
 matplotlib>=3.5
 ddgs>=8.0
+firecrawl-anydoc>=0.2.3

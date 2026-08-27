@@ -26,13 +26,56 @@ def _sanitize(name):
     return re.sub(r"[^a-zA-Z0-9_-]", "_", str(name))[:40] or "tool"
 
 
+def _resolve_sandbox(sandbox):
+    """Resolve a sandbox path to an absolute, canonical directory, or None."""
+    if not sandbox:
+        return None
+    path = os.path.realpath(os.path.abspath(str(sandbox)))
+    return path if os.path.isdir(path) else None
+
+
+def _is_write_tool(name):
+    n = str(name).lower()
+    return any(h in n for h in WRITE_HINTS)
+
+
+def _check_sandbox(srv, args):
+    """Return an error string if any path argument escapes the sandbox, else None."""
+    if not srv.sandbox or not isinstance(args, dict):
+        return None
+    for key, val in args.items():
+        if key not in PATH_KEYS:
+            continue
+        for v in (val if isinstance(val, list) else [val]):
+            if not isinstance(v, str) or not v.strip():
+                continue
+            try:
+                target = os.path.realpath(os.path.abspath(v))
+            except Exception:
+                return f"Refusing '{v}': cannot resolve path."
+            if target != srv.sandbox and not target.startswith(srv.sandbox + os.sep):
+                return (f"Refusing '{v}': outside the sandbox '{srv.sandbox}'. "
+                        f"Filesystem access is confined to that directory.")
+    return None
+
+
+# Tool names (or substrings) that mutate state. Used for the read-only guardrail.
+WRITE_HINTS = ("write", "create", "delete", "remove", "move", "rename", "edit", "mkdir", "rmdir", "append")
+# Argument keys whose values are file paths we must keep inside the sandbox.
+PATH_KEYS = ("path", "source", "destination", "uri", "file_path", "dir_path", "target")
+
+
 class MCPServer:
-    def __init__(self, name, command, args=None, env=None, call_timeout=None):
+    def __init__(self, name, command, args=None, env=None, call_timeout=None,
+                 read_only=False, sandbox=None):
         self.name = name
         self.command = str(command)
         self.args = [str(a) for a in (args or [])]
         self.env = {str(k): str(v) for k, v in (env or {}).items()}
         self.call_timeout = float(call_timeout) if call_timeout else DEFAULT_CALL_TIMEOUT
+        # Guardrails: read-only blocks write tools; sandbox confines path args.
+        self.read_only = bool(read_only)
+        self.sandbox = _resolve_sandbox(sandbox)
         self.proc = None
         self.queue = None
         self._id = 0
@@ -147,7 +190,7 @@ def _register_server(name, cfg):
     entry = {"name": name, "ok": False, "error": "", "server": "", "tools": []}
     _status[name] = entry
     srv = MCPServer(name, cfg.get("command"), cfg.get("args"), cfg.get("env"),
-                    cfg.get("call_timeout"))
+                     cfg.get("call_timeout"), cfg.get("read_only"), cfg.get("sandbox"))
     try:
         entry["server"] = srv.start()
         tools = srv.list_tools()
@@ -231,6 +274,16 @@ def route_call(openai_name, args):
     if not hit:
         return {"error": f"unknown MCP tool: {openai_name}"}
     srv, orig = hit
+    # Guardrail 1: read-only servers cannot perform mutating operations.
+    if srv.read_only and _is_write_tool(orig):
+        return {"error": (
+            f"Write tool '{orig}' blocked: server '{srv.name}' is read-only. "
+            f"Enable writes in data/mcp.json with \"read_only\": false (and set a \"sandbox\")."
+        )}
+    # Guardrail 2: keep every path argument inside the configured sandbox.
+    sandbox_err = _check_sandbox(srv, args)
+    if sandbox_err:
+        return {"error": sandbox_err}
     try:
         return srv.call(orig, args or {})
     except MCPError as e:
